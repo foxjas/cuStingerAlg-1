@@ -218,7 +218,7 @@ __global__ void forAllEdgesAdjUnionImbalancedKernel(HornetDevice hornet, T* __re
         vid_t src = src_vtx.id();
         vid_t dest = dst_vtx.id();
 
-        bool avoidCalc = (src == dest) || (srcLen < 2);
+        bool avoidCalc = (src == dest) || (src < dest) || (srcLen < 2);
         if (avoidCalc)
             continue;
 
