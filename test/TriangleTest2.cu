@@ -12,7 +12,6 @@
 #include <Graph/GraphStd.hpp>
 #include <Util/CommandLineParam.hpp>
 #include <cuda_profiler_api.h> //--profile-from-start off
-
 #include "Static/TriangleCounting/triangle2.cuh"
 
 using namespace timer;
@@ -55,6 +54,7 @@ void hostCountTriangles (const vid_t nv, const vid_t ne, const eoff_t * off,
 {
     int32_t edge=0;
     int64_t sum=0;
+
     for (vid_t src = 0; src < nv; src++)
     {
         degree_t srcLen=off[src+1]-off[src];
@@ -96,12 +96,11 @@ int main(int argc, char* argv[]) {
     TriangleCounting2 tc(hornet_graph);
     tc.init();
     
-    int work_factor;
+    const int work_factor = 9999;
+	char* outPath;
     if (argc > 2) {
-        work_factor = atoi(argv[2]);
-    } else {
-        work_factor = 1;
-    }
+        outPath = argv[2];
+    } 
 
     Timer<DEVICE> TM(5);
     //cudaProfilerStart();
@@ -115,12 +114,9 @@ int main(int argc, char* argv[]) {
 
     triangle_t deviceTriangleCount = tc.countTriangles();
     printf("Device triangles: %llu\n", deviceTriangleCount);
-  
-    /*
-    int64_t hostTriCount = 0;
-    std::cout << "Starting host triangle counting" << std::endl;
-    hostCountTriangles(graph.nV(), graph.nE(),graph.csr_out_offsets(), graph.csr_out_edges(),&hostTriCount);
-    std::cout << "Host triangles: " << hostTriCount << std::endl;
-    */
+
+	if (argc > 2) {	
+		tc.writeToFile(outPath);
+  	}
     return 0;
 }

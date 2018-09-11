@@ -29,12 +29,12 @@ public:
 
     void run(const int WORK_FACTOR);
     void init();
-    void copyTCToHost(triangle_t* h_tcs);
 
     triangle_t countTriangles();
+    void writeToFile(char* outPath);
 
 private:
-   triangle_t* triPerVertex { nullptr };
+   triangle_t* triPerEdge { nullptr };
 
 };
 

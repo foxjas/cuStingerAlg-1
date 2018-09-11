@@ -3,6 +3,8 @@
 #include <cuda_runtime.h>
 
 #include "Static/TriangleCounting/triangle2.cuh"
+#include <iostream>
+#include <fstream>
 
 namespace hornets_nest {
 
@@ -17,48 +19,42 @@ TriangleCounting2::~TriangleCounting2(){
 }
 
 struct OPERATOR_InitTriangleCounts {
-    triangle_t *d_triPerVertex;
-
+    triangle_t *d_triPerEdge;
+    const eoff_t* d_offsets;
+    // usage in ForAllEdges preferable, but unclear how to get dst index in adjacency
     OPERATOR (Vertex &vertex) {
-        d_triPerVertex[vertex.id()] = 0;
+        degree_t degree = vertex.degree();
+        for (int i=0; i<degree; i++) {
+            eoff_t src_offset = d_offsets[vertex.id()];
+            //d_triPerEdge[src_offset+i] = 1; // test: total count should = |E|
+            d_triPerEdge[src_offset+i] = 0; 
+        }
     }
 };
 
 /*
- * Naive intersection operator
- * Assumption: access to entire adjacencies of v1 and v2 required
+ * Search for position of key in array
  */
-struct OPERATOR_AdjIntersectionCount {
-    triangle_t* d_triPerVertex;
-
-    OPERATOR(Vertex& v1, Vertex& v2, int flag) {
-        triangle_t count = 0;
-        int deg1 = v1.degree();
-        int deg2 = v2.degree();
-        vid_t* ui_begin = v1.neighbor_ptr();
-        vid_t* vi_begin = v2.neighbor_ptr();
-        vid_t* ui_end = ui_begin+deg1-1;
-        vid_t* vi_end = vi_begin+deg2-1;
-        int comp_equals, comp1, comp2;
-        while (vi_begin <= vi_end && ui_begin <= ui_end) {
-            comp_equals = (*ui_begin == *vi_begin);
-            count += comp_equals;
-            comp1 = (*ui_begin >= *vi_begin);
-            comp2 = (*ui_begin <= *vi_begin);
-            vi_begin += comp1;
-            ui_begin += comp2;
-            // early termination
-            if ((vi_begin > vi_end) || (ui_begin > ui_end))
-                break;
-        }
-        atomicAdd(d_triPerVertex+v1.id(), count);
-        atomicAdd(d_triPerVertex+v2.id(), count);
+__device__ __forceinline__
+void indexBinarySearch(vid_t* data, vid_t arrLen, vid_t key, vid_t& pos) {
+    vid_t low = 0;
+    vid_t high = arrLen - 1;
+    while (high >= low) {
+        vid_t middle = (low + high) / 2;
+        if (data[middle] == key) {
+             pos = middle;
+             return;
+        } else if (data[middle] < key) {
+            low = middle + 1;
+		} else {
+            high = middle - 1;
+		}
     }
-};
-
+}
 
 struct OPERATOR_AdjIntersectionCountBalanced {
-    triangle_t* d_triPerVertex;
+    triangle_t* d_triPerEdge;
+    const eoff_t* d_offsets;
 
     OPERATOR(Vertex &u, Vertex& v, vid_t* ui_begin, vid_t* ui_end, vid_t* vi_begin, vid_t* vi_end, int FLAG) {
         int count = 0;
@@ -102,58 +98,77 @@ struct OPERATOR_AdjIntersectionCountBalanced {
                 ui_begin += 1;
             }
         }
-
-        atomicAdd(d_triPerVertex+u.id(), count);
-        //atomicAdd(d_triPerVertex+v.id(), count);
+		vid_t dst_neigh_index = -1; 
+		// search in smaller degree vertex
+		indexBinarySearch(u.neighbor_ptr(), u.degree(), v.id(), dst_neigh_index);
+        eoff_t src_offset = d_offsets[u.id()];
+        atomicAdd(d_triPerEdge+src_offset+dst_neigh_index, count);
     }
 };
 
-void TriangleCounting2::copyTCToHost(triangle_t* h_tcs) {
-    gpu::copyToHost(triPerVertex, hornet.nV(), h_tcs);
-}
 
 triangle_t TriangleCounting2::countTriangles(){
 
-    triangle_t* h_triPerVertex;
-    host::allocate(h_triPerVertex, hornet.nV());
-    gpu::copyToHost(triPerVertex, hornet.nV(), h_triPerVertex);
+    triangle_t* h_triPerEdge;
+    host::allocate(h_triPerEdge, hornet.nE());
+    gpu::copyToHost(triPerEdge, hornet.nE(), h_triPerEdge);
     triangle_t sum=0;
-    for(int i=0; i<hornet.nV(); i++){
+    for(int i=0; i<hornet.nE(); i++){
         // printf("%d %ld\n", i,outputArray[i]);
-        sum+=h_triPerVertex[i];
+        sum+=h_triPerEdge[i];
     }
-    free(h_triPerVertex);
-    //triangle_t sum=gpu::reduce(hd_triangleData().triPerVertex, hd_triangleData().nv+1);
+    free(h_triPerEdge);
+    //triangle_t sum=gpu::reduce(hd_triangleData().triPerEdge, hd_triangleData().nv+1);
 
     return sum;
 }
 
+/*
+ * Writes triangle counts by edge to file
+ */
+void TriangleCounting2::writeToFile(char* outPath) {
+
+    triangle_t* h_triPerEdge;
+    host::allocate(h_triPerEdge, hornet.nE());
+    gpu::copyToHost(triPerEdge, hornet.nE(), h_triPerEdge);
+
+	std::ofstream fout;
+    fout.open(outPath);
+	const eoff_t* offsets = hornet.csr_offsets();
+	const vid_t* edges = hornet.csr_edges();
+	vid_t dst = -1;
+	triangle_t triangles = 0;
+    for (vid_t src=0; src<hornet.nV(); src++) {
+		for (eoff_t j=offsets[src]; j<offsets[src+1]; j++) {
+			dst = edges[j];
+			triangles = h_triPerEdge[j];
+			fout << src << " " << dst << " " << triangles << "\n";
+		}
+    }
+    fout.close();
+    free(h_triPerEdge);
+}
 
 void TriangleCounting2::reset(){
-    //printf("Inside reset()\n");
-    forAllVertices(hornet, OPERATOR_InitTriangleCounts { triPerVertex });
+    forAllVertices(hornet, OPERATOR_InitTriangleCounts { triPerEdge, hornet.device_csr_offsets() });
 }
 
 void TriangleCounting2::run() {
-    //printf("Inside run()\n");
-    forAllAdjUnions(hornet, OPERATOR_AdjIntersectionCountBalanced { triPerVertex }, 1);
-    //forAllAdjUnions(hornet, OPERATOR_AdjIntersectionCount { triPerVertex });
+    forAllAdjUnions(hornet, OPERATOR_AdjIntersectionCountBalanced { triPerEdge, hornet.device_csr_offsets() }, 1);
 }
 
 void TriangleCounting2::run(const int WORK_FACTOR=1){
-    forAllAdjUnions(hornet, OPERATOR_AdjIntersectionCountBalanced { triPerVertex }, WORK_FACTOR);
+    forAllAdjUnions(hornet, OPERATOR_AdjIntersectionCountBalanced { triPerEdge, hornet.device_csr_offsets() }, WORK_FACTOR);
 }
 
 
 void TriangleCounting2::release(){
-    //printf("Inside release\n");
-    gpu::free(triPerVertex);
-    triPerVertex = nullptr;
+    gpu::free(triPerEdge);
+    triPerEdge = nullptr;
 }
 
 void TriangleCounting2::init(){
-    //printf("Inside init. Printing hornet.nV(): %d\n", hornet.nV());
-    gpu::allocate(triPerVertex, hornet.nV());
+    gpu::allocate(triPerEdge, hornet.nE());
     reset();
 }
 

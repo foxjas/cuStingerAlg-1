@@ -344,15 +344,15 @@ namespace adj_unions {
         const int WORK_FACTOR;
         int total_work, bin_index;
 
+        // Choose the bin to place this edge into
         OPERATOR(Vertex& src, Vertex& dst) {
-            // Choose the bin to place this edge into
-            if (src.id() <= dst.id())
+            if (src.id() <= dst.id()) // only need to consider half of edges for undirected graph
                 return;
             degree_t src_len = src.degree();
             degree_t dst_len = dst.degree();
             degree_t u_len = (src_len <= dst_len) ? src_len : dst_len;
             degree_t v_len = (src_len <= dst_len) ? dst_len : src_len;
-            if (u_len < 2)
+            if (u_len < 2) // triangle requires minimum deg 2
                 return;
             unsigned int log_u = std::min(32-__clz(u_len), 31);
             unsigned int log_v = std::min(32-__clz(v_len), 31);
