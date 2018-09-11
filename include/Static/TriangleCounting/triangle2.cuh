@@ -31,6 +31,7 @@ public:
     void init();
 
     triangle_t countTriangles();
+    void writeToFile(char* outPath);
 
 private:
    triangle_t* triPerEdge { nullptr };

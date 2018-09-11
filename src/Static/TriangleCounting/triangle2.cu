@@ -3,6 +3,8 @@
 #include <cuda_runtime.h>
 
 #include "Static/TriangleCounting/triangle2.cuh"
+#include <iostream>
+#include <fstream>
 
 namespace hornets_nest {
 
@@ -34,7 +36,7 @@ struct OPERATOR_InitTriangleCounts {
  * Search for position of key in array
  */
 __device__ __forceinline__
-void indexBinarySearch(vid_t* data, vid_t arrLen, vid_t key, int& pos) {
+void indexBinarySearch(vid_t* data, vid_t arrLen, vid_t key, vid_t& pos) {
     vid_t low = 0;
     vid_t high = arrLen - 1;
     while (high >= low) {
@@ -97,6 +99,7 @@ struct OPERATOR_AdjIntersectionCountBalanced {
             }
         }
 		vid_t dst_neigh_index = -1; 
+		// search in smaller degree vertex
 		indexBinarySearch(u.neighbor_ptr(), u.degree(), v.id(), dst_neigh_index);
         eoff_t src_offset = d_offsets[u.id()];
         atomicAdd(d_triPerEdge+src_offset+dst_neigh_index, count);
@@ -120,6 +123,28 @@ triangle_t TriangleCounting2::countTriangles(){
     return sum;
 }
 
+void TriangleCounting2::writeToFile(char* outPath) {
+
+    triangle_t* h_triPerEdge;
+    host::allocate(h_triPerEdge, hornet.nE());
+    gpu::copyToHost(triPerEdge, hornet.nE(), h_triPerEdge);
+
+	std::ofstream fout;
+    fout.open(outPath);
+	const eoff_t* offsets = hornet.csr_offsets();
+	const vid_t* edges = hornet.csr_edges();
+	vid_t dst = -1;
+	triangle_t triangles = 0;
+    for (vid_t src=0; src<hornet.nV(); src++) {
+		for (eoff_t j=offsets[src]; j<offsets[src+1]; j++) {
+			dst = edges[j];
+			triangles = h_triPerEdge[j];
+			fout << src << " " << dst << " " << triangles << "\n";
+		}
+    }
+    fout.close();
+    free(h_triPerEdge);
+}
 
 void TriangleCounting2::reset(){
     forAllVertices(hornet, OPERATOR_InitTriangleCounts { triPerEdge, hornet.device_csr_offsets() });
