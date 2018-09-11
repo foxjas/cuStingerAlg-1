@@ -114,10 +114,6 @@ __global__ void forAllEdgesAdjUnionBalancedKernel(HornetDevice hornet, T* __rest
         vid_t src = src_vtx.id();
         vid_t dest = dst_vtx.id();
 
-        bool avoidCalc = (src == dest) || (srcLen < 2);
-        if (avoidCalc)
-            continue;
-
         // determine u,v where |adj(u)| <= |adj(v)|
         bool sourceSmaller = srcLen < destLen;
         vid_t u = sourceSmaller ? src : dest;
@@ -217,10 +213,6 @@ __global__ void forAllEdgesAdjUnionImbalancedKernel(HornetDevice hornet, T* __re
         int destLen = dst_vtx.degree();
         vid_t src = src_vtx.id();
         vid_t dest = dst_vtx.id();
-
-        bool avoidCalc = (src == dest) || (srcLen < 2);
-        if (avoidCalc)
-            continue;
 
         // determine u,v where |adj(u)| <= |adj(v)|
         bool sourceSmaller = srcLen < destLen;
@@ -354,10 +346,14 @@ namespace adj_unions {
 
         OPERATOR(Vertex& src, Vertex& dst) {
             // Choose the bin to place this edge into
+            if (src.id() <= dst.id())
+                return;
             degree_t src_len = src.degree();
             degree_t dst_len = dst.degree();
             degree_t u_len = (src_len <= dst_len) ? src_len : dst_len;
             degree_t v_len = (src_len <= dst_len) ? dst_len : src_len;
+            if (u_len < 2)
+                return;
             unsigned int log_u = std::min(32-__clz(u_len), 31);
             unsigned int log_v = std::min(32-__clz(v_len), 31);
             int binary_work_est = u_len*log_v;
