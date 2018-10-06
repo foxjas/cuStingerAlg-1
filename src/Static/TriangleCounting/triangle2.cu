@@ -137,12 +137,13 @@ void TriangleCounting2::writeToFile(char* outPath) {
 	const eoff_t* offsets = hornet.csr_offsets();
 	const vid_t* edges = hornet.csr_edges();
 	vid_t dst = -1;
+    fout << "# Nodes: " << hornet.nV() << " Edges: " << hornet.nE() << std::endl;
 	triangle_t triangles = 0;
     for (vid_t src=0; src<hornet.nV(); src++) {
 		for (eoff_t j=offsets[src]; j<offsets[src+1]; j++) {
 			dst = edges[j];
 			triangles = h_triPerEdge[j];
-			fout << src << " " << dst << " " << triangles << "\n";
+			fout << src << " " << dst << " " << triangles << std::endl;
 		}
     }
     fout.close();
