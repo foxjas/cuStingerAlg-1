@@ -72,7 +72,8 @@ void forAll(const TwoLevelQueue<T>& queue,
 
 template<typename HornetClass, typename T, typename Operator>
 void forAllVertexPairs(HornetClass&            hornet,
-                       const TwoLevelQueue<T>& queue,
+                       T* __restrict__ vertex_pairs,
+                       unsigned long long vertex_pairs_size,
                        const Operator&         op);
 
 /**
@@ -173,7 +174,8 @@ void forAllAdjUnions(HornetClass&         hornet,
 
 template<typename HornetClass, typename Operator>
 void forAllAdjUnions(HornetClass&         hornet,
-                     TwoLevelQueue<vid2_t> vertex_pairs,
+                     vid2_t* __restrict__ vertex_pairs,
+                     unsigned long long vertex_pairs_size,
                      const Operator&      op,
                      const int WORK_FACTOR=1);
 

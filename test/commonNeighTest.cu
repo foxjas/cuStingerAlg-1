@@ -87,13 +87,12 @@ int main(int argc, char* argv[]) {
     using namespace graph::parsing_prop;
 
     graph::GraphStd<vid_t, eoff_t> graph(UNDIRECTED);
-    //graph.read(argv[1], DIRECTED_BY_DEGREE | PRINT_INFO | SORT);
     graph.read(argv[1], PRINT_INFO | SORT);
     HornetInit hornet_init(graph.nV(), graph.nE(), graph.csr_out_offsets(),
                            graph.csr_out_edges());
 
     HornetGraph hornet_graph(hornet_init);
-    TriangleCounting2 tc(hornet_graph);
+    commonNeigh tc(hornet_graph);
     tc.init();
     
     const int work_factor = 9999;
@@ -101,6 +100,7 @@ int main(int argc, char* argv[]) {
     if (argc > 2) {
         outPath = argv[2];
     } 
+
 
     Timer<DEVICE> TM(5);
     //cudaProfilerStart();

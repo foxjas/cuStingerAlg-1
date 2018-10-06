@@ -23,7 +23,7 @@ __global__ void forAllKernel(T* __restrict__ array, int size, Operator op) {
 }
 
 template<typename HornetDevice, typename T, typename Operator>
-__global__ void forAllVertexPairsKernel(HornetDevice hornet, T* __restrict__ array, int size, Operator op) {
+__global__ void forAllVertexPairsKernel(HornetDevice hornet, T* __restrict__ array, unsigned long long size, Operator op) {
     int     id = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     for (auto i = id; i < size; i += stride) {
@@ -390,12 +390,13 @@ void forAllAdjUnions(HornetClass&         hornet,
                      const Operator&      op,
                      const int WORK_FACTOR)
 {
-    forAllAdjUnions(hornet, TwoLevelQueue<vid2_t>(hornet, 0), op, WORK_FACTOR); // TODO: why can't just pass in 0?
+    forAllAdjUnions(hornet, NULL, 0, op, WORK_FACTOR); 
 }
 
 template<typename HornetClass, typename Operator>
 void forAllAdjUnions(HornetClass&          hornet,
-                     TwoLevelQueue<vid2_t> vertex_pairs,
+                     vid2_t* __restrict__ vertex_pairs,
+                     unsigned long long vertex_pairs_size,
                      const Operator&       op,
                      const int WORK_FACTOR)
 {
@@ -417,8 +418,8 @@ void forAllAdjUnions(HornetClass&          hornet,
     unsigned long long *queue_pos = (unsigned long long *)calloc(MAX_ADJ_UNIONS_BINS+1, sizeof(unsigned long long));
 
     // figure out cutoffs/counts per bin
-    if (vertex_pairs.size())
-        forAllVertexPairs(hornet, vertex_pairs, bin_edges {hd_queue_info, true, WORK_FACTOR});
+    if (vertex_pairs != NULL)
+        forAllVertexPairs(hornet, vertex_pairs, vertex_pairs_size, bin_edges {hd_queue_info, true, WORK_FACTOR});
     else
         forAllEdgeVertexPairs(hornet, bin_edges {hd_queue_info, true, WORK_FACTOR}, load_balancing);
 
@@ -433,8 +434,8 @@ void forAllAdjUnions(HornetClass&          hornet,
         printf("queue=%d prefix sum: %llu\n", i, queue_pos[i]);
     */
     // bin edges
-    if (vertex_pairs.size())
-        forAllVertexPairs(hornet, vertex_pairs, bin_edges {hd_queue_info, false, WORK_FACTOR});
+    if (vertex_pairs != NULL) 
+        forAllVertexPairs(hornet, vertex_pairs, vertex_pairs_size, bin_edges {hd_queue_info, false, WORK_FACTOR});
     else
         forAllEdgeVertexPairs(hornet, bin_edges {hd_queue_info, false, WORK_FACTOR}, load_balancing);
 
@@ -603,14 +604,16 @@ void forAll(const TwoLevelQueue<T>& queue, const Operator& op) {
 
 template<typename HornetClass, typename T, typename Operator>
 void forAllVertexPairs(HornetClass&            hornet,
-                       const TwoLevelQueue<T>& queue,
+                       T* __restrict__ vertex_pairs,
+                       unsigned long long vertex_pairs_size,
                        const Operator&         op) {
-    auto size = queue.size();
+
+    auto size = vertex_pairs_size; 
     if (size == 0)
         return;
     detail::forAllVertexPairsKernel
         <<< xlib::ceil_div<BLOCK_SIZE_OP2>(size), BLOCK_SIZE_OP2 >>>
-        (hornet.device_side(), queue.device_input_ptr(), size, op);
+        (hornet.device_side(), vertex_pairs, size, op);
     CHECK_CUDA_ERROR
 }
 

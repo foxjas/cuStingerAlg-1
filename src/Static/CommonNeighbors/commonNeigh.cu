@@ -8,13 +8,13 @@
 
 namespace hornets_nest {
 
-TriangleCounting2::TriangleCounting2(HornetGraph& hornet) :
+commonNeigh::commonNeigh(HornetGraph& hornet) :
                                        StaticAlgorithm(hornet)
 
 {                                       
 }
 
-TriangleCounting2::~TriangleCounting2(){
+commonNeigh::~commonNeigh(){
     release();
 }
 
@@ -107,7 +107,7 @@ struct OPERATOR_AdjIntersectionCountBalanced {
 };
 
 
-triangle_t TriangleCounting2::countTriangles(){
+triangle_t commonNeigh::countTriangles(){
 
     triangle_t* h_triPerEdge;
     host::allocate(h_triPerEdge, hornet.nE());
@@ -126,7 +126,7 @@ triangle_t TriangleCounting2::countTriangles(){
 /*
  * Writes triangle counts by edge to file
  */
-void TriangleCounting2::writeToFile(char* outPath) {
+void commonNeigh::writeToFile(char* outPath) {
 
     triangle_t* h_triPerEdge;
     host::allocate(h_triPerEdge, hornet.nE());
@@ -150,25 +150,43 @@ void TriangleCounting2::writeToFile(char* outPath) {
     free(h_triPerEdge);
 }
 
-void TriangleCounting2::reset(){
+void commonNeigh::reset(){
     forAllVertices(hornet, OPERATOR_InitTriangleCounts { triPerEdge, hornet.device_csr_offsets() });
 }
 
-void TriangleCounting2::run() {
-    forAllAdjUnions(hornet, OPERATOR_AdjIntersectionCountBalanced { triPerEdge, hornet.device_csr_offsets() }, 1);
+void commonNeigh::run() {
+    return;
 }
 
-void TriangleCounting2::run(const int WORK_FACTOR=1){
-    forAllAdjUnions(hornet, OPERATOR_AdjIntersectionCountBalanced { triPerEdge, hornet.device_csr_offsets() }, WORK_FACTOR);
+void commonNeigh::run(const int WORK_FACTOR=1){
+    const unsigned int QUEUE_PAIRS_LIMIT = 1E9;
+    const unsigned int nV = hornet.nV(); 
+    vid2_t* vertexPairs = NULL;
+    unsigned int nPairs;
+    unsigned int vStepSize = ceil(QUEUE_PAIRS_LIMIT/nV);
+    unsigned int vStart = 0;
+    unsigned int vEnd = vStart + vStepSize; 
+    unsigned int queue_size;
+
+    while (vStart < nV) {
+       vertexPairs = new vid2_t[QUEUE_PAIRS_LIMIT];
+       // TODO: fill array 
+
+       forAllAdjUnions(hornet, vertexPairs, queue_size, OPERATOR_AdjIntersectionCountBalanced { triPerEdge, hornet.device_csr_offsets() }, WORK_FACTOR); 
+       vStart = vEnd;
+       vEnd += vStepSize;
+       delete [] vertexPairs;
+       
+    }
 }
 
 
-void TriangleCounting2::release(){
+void commonNeigh::release(){
     gpu::free(triPerEdge);
     triPerEdge = nullptr;
 }
 
-void TriangleCounting2::init(){
+void commonNeigh::init(){
     gpu::allocate(triPerEdge, hornet.nE());
     reset();
 }

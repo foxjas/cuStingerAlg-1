@@ -17,10 +17,10 @@ using HornetGraph = gpu::Hornet<EMPTY, EMPTY>;
 
 //==============================================================================
 
-class TriangleCounting2 : public StaticAlgorithm<HornetGraph> {
+class commonNeigh : public StaticAlgorithm<HornetGraph> {
 public:
-    TriangleCounting2(HornetGraph& hornet);
-    ~TriangleCounting2();
+    commonNeigh(HornetGraph& hornet);
+    ~commonNeigh();
 
     void reset()    override;
     void run()      override;
