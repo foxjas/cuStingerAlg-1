@@ -14,8 +14,8 @@ include_directories(externals/hornet/externals/xlib/include)
 
 include(externals/hornet/externals/xlib/util/CMakeLists.txt)
 #-------------------------------------------------------------------------------
-file(GLOB_RECURSE CU_SRCS ${PROJECT_SOURCE_DIR}/src/triangle2*)
-file(GLOB_RECURSE CPP_SRCS ${PROJECT_SOURCE_DIR}/externals/xlib/src/triangle2*)
+file(GLOB_RECURSE CU_SRCS ${PROJECT_SOURCE_DIR}/src/*)
+file(GLOB_RECURSE CPP_SRCS ${PROJECT_SOURCE_DIR}/externals/xlib/src/*)
 
 cuda_add_library(hornetAlg ${CU_SRCS})
 #-------------------------------------------------------------------------------
@@ -29,6 +29,7 @@ cuda_add_library(hornetAlg ${CU_SRCS})
 #cuda_add_executable(dyn_katz test/KatzDynamicTest.cu)
 #cuda_add_executable(triangle test/TriangleTest.cu)
 cuda_add_executable(triangle2 test/TriangleTest2.cu)
+cuda_add_executable(commonNeigh test/commonNeighTest.cu)
 #cuda_add_executable(pr test/PageRankTest.cu)
 
 #target_link_libraries(bfs      hornetAlg hornet)
@@ -41,4 +42,5 @@ cuda_add_executable(triangle2 test/TriangleTest2.cu)
 #target_link_libraries(dyn_katz hornetAlg hornet)
 #target_link_libraries(triangle hornetAlg hornet)
 target_link_libraries(triangle2 hornetAlg hornet)
+target_link_libraries(commonNeigh hornetAlg hornet)
 #target_link_libraries(pr hornetAlg hornet)
