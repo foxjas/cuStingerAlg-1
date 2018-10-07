@@ -5,6 +5,7 @@
 #include "Static/CommonNeighbors/commonNeigh.cuh"
 #include <iostream>
 #include <fstream>
+#include <math.h> 
 
 namespace hornets_nest {
 
@@ -54,6 +55,7 @@ void indexBinarySearch(vid_t* data, vid_t arrLen, vid_t key, vid_t& pos) {
 
 struct OPERATOR_AdjIntersectionCountBalanced {
     triangle_t* d_triPerEdge;
+    //vid2_t* d_vertexPairs;
     const eoff_t* d_offsets;
 
     OPERATOR(Vertex &u, Vertex& v, vid_t* ui_begin, vid_t* ui_end, vid_t* vi_begin, vid_t* vi_end, int FLAG) {
@@ -98,11 +100,14 @@ struct OPERATOR_AdjIntersectionCountBalanced {
                 ui_begin += 1;
             }
         }
+        printf("(%d, %d)\n", u.id(), v.id());
+        /*
 		vid_t dst_neigh_index = -1; 
 		// search in smaller degree vertex
 		indexBinarySearch(u.neighbor_ptr(), u.degree(), v.id(), dst_neigh_index);
         eoff_t src_offset = d_offsets[u.id()];
         atomicAdd(d_triPerEdge+src_offset+dst_neigh_index, count);
+        */
     }
 };
 
@@ -162,22 +167,32 @@ void commonNeigh::run(const int WORK_FACTOR=1){
     const unsigned int QUEUE_PAIRS_LIMIT = 1E9;
     const unsigned int nV = hornet.nV(); 
     vid2_t* vertexPairs = NULL;
-    unsigned int nPairs;
-    unsigned int vStepSize = ceil(QUEUE_PAIRS_LIMIT/nV);
+    const unsigned int vStepSize = ceil(QUEUE_PAIRS_LIMIT/nV); // double to avoid underflow from division
     unsigned int vStart = 0;
-    unsigned int vEnd = vStart + vStepSize; 
+    unsigned int vEnd = min(vStart + vStepSize, nV); 
     unsigned int queue_size;
 
-    while (vStart < nV) {
-       vertexPairs = new vid2_t[QUEUE_PAIRS_LIMIT];
-       // TODO: fill array 
+    vertexPairs = new vid2_t[QUEUE_PAIRS_LIMIT];
+    vid2_t* d_vertexPairs = nullptr; 
+    gpu::allocate(d_vertexPairs, QUEUE_PAIRS_LIMIT); // could be smaller
 
-       forAllAdjUnions(hornet, vertexPairs, queue_size, OPERATOR_AdjIntersectionCountBalanced { triPerEdge, hornet.device_csr_offsets() }, WORK_FACTOR); 
+    while (vStart < nV) {
+        std::cout << "vStart: " << vStart << ", " << "vEnd: " << vEnd << std::endl;
+       // fill array 
+       for (unsigned int v = vStart; v < vEnd; v++) {
+           for (unsigned int index = 0; index < nV; index++) {
+              vertexPairs[v*nV+index] = xlib::make2<vid_t>(v, index);
+           }
+       }
+       queue_size = (vEnd-vStart)*nV;
+       cudaMemcpy(d_vertexPairs, vertexPairs, queue_size*sizeof(vid2_t), cudaMemcpyHostToDevice);
+       forAllAdjUnions(hornet, d_vertexPairs, queue_size, OPERATOR_AdjIntersectionCountBalanced { triPerEdge, hornet.device_csr_offsets() }, WORK_FACTOR); 
        vStart = vEnd;
-       vEnd += vStepSize;
-       delete [] vertexPairs;
-       
+       vEnd = min(vEnd+vStepSize, nV);
     }
+
+    delete [] vertexPairs;
+    gpu::free(d_vertexPairs);
 }
 
 
