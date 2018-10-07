@@ -108,12 +108,11 @@ int main(int argc, char* argv[]) {
 
     tc.run(work_factor);
 
-    TM.stop();
     //cudaProfilerStop();
     TM.print("Computation time:");
 
-    triangle_t deviceTriangleCount = tc.countTriangles();
-    printf("Device triangles: %llu\n", deviceTriangleCount);
+    //triangle_t deviceTriangleCount = tc.countTriangles();
+    //printf("Device triangles: %llu\n", deviceTriangleCount);
 
 	if (argc > 2) {	
 		tc.writeToFile(outPath);

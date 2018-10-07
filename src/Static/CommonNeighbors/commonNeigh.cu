@@ -18,20 +18,20 @@ commonNeigh::commonNeigh(HornetGraph& hornet) :
 commonNeigh::~commonNeigh(){
     release();
 }
-
-struct OPERATOR_InitTriangleCounts {
-    triangle_t *d_triPerEdge;
-    const eoff_t* d_offsets;
+/*
+struct OPERATOR_InitPairCommonNeighCounts {
+    triangle_t *d_countsPerPair;
     // usage in ForAllEdges preferable, but unclear how to get dst index in adjacency
     OPERATOR (Vertex &vertex) {
         degree_t degree = vertex.degree();
         for (int i=0; i<degree; i++) {
             eoff_t src_offset = d_offsets[vertex.id()];
-            //d_triPerEdge[src_offset+i] = 1; // test: total count should = |E|
-            d_triPerEdge[src_offset+i] = 0; 
+            //d_countsPerPair[src_offset+i] = 1; // test: total count should = |E|
+            d_countsPerPair[src_offset+i] = 0; 
         }
     }
 };
+*/
 
 /*
  * Search for position of key in array
@@ -54,9 +54,9 @@ void indexBinarySearch(vid_t* data, vid_t arrLen, vid_t key, vid_t& pos) {
 }
 
 struct OPERATOR_AdjIntersectionCountBalanced {
-    triangle_t* d_triPerEdge;
-    //vid2_t* d_vertexPairs;
-    const eoff_t* d_offsets;
+    triangle_t* d_countsPerPair;
+    const unsigned int vertex_offset;
+    const unsigned int nV;
 
     OPERATOR(Vertex &u, Vertex& v, vid_t* ui_begin, vid_t* ui_end, vid_t* vi_begin, vid_t* vi_end, int FLAG) {
         int count = 0;
@@ -101,41 +101,36 @@ struct OPERATOR_AdjIntersectionCountBalanced {
             }
         }
         printf("(%d, %d)\n", u.id(), v.id());
-        /*
-		vid_t dst_neigh_index = -1; 
-		// search in smaller degree vertex
-		indexBinarySearch(u.neighbor_ptr(), u.degree(), v.id(), dst_neigh_index);
-        eoff_t src_offset = d_offsets[u.id()];
-        atomicAdd(d_triPerEdge+src_offset+dst_neigh_index, count);
-        */
+        eoff_t offset = (u.id()-vertex_offset)*nV+v.id();
+        atomicAdd(d_countsPerPair+offset, count);
     }
 };
 
 
 triangle_t commonNeigh::countTriangles(){
 
-    triangle_t* h_triPerEdge;
-    host::allocate(h_triPerEdge, hornet.nE());
-    gpu::copyToHost(triPerEdge, hornet.nE(), h_triPerEdge);
+    triangle_t* h_countsPerPair;
+    host::allocate(h_countsPerPair, hornet.nE());
+    gpu::copyToHost(d_countsPerPair, hornet.nE(), h_countsPerPair);
     triangle_t sum=0;
     for(int i=0; i<hornet.nE(); i++){
         // printf("%d %ld\n", i,outputArray[i]);
-        sum+=h_triPerEdge[i];
+        sum+=h_countsPerPair[i];
     }
-    free(h_triPerEdge);
-    //triangle_t sum=gpu::reduce(hd_triangleData().triPerEdge, hd_triangleData().nv+1);
+    free(h_countsPerPair);
+    //triangle_t sum=gpu::reduce(hd_triangleData().countsPerPair, hd_triangleData().nv+1);
 
     return sum;
 }
 
 /*
- * Writes triangle counts by edge to file
+ * Writes common neighbor counts to file
  */
 void commonNeigh::writeToFile(char* outPath) {
 
-    triangle_t* h_triPerEdge;
-    host::allocate(h_triPerEdge, hornet.nE());
-    gpu::copyToHost(triPerEdge, hornet.nE(), h_triPerEdge);
+    triangle_t* h_countsPerPair;
+    host::allocate(h_countsPerPair, hornet.nE());
+    gpu::copyToHost(d_countsPerPair, hornet.nE(), h_countsPerPair);
 
 	std::ofstream fout;
     fout.open(outPath);
@@ -147,16 +142,28 @@ void commonNeigh::writeToFile(char* outPath) {
     for (vid_t src=0; src<hornet.nV(); src++) {
 		for (eoff_t j=offsets[src]; j<offsets[src+1]; j++) {
 			dst = edges[j];
-			triangles = h_triPerEdge[j];
+			triangles = h_countsPerPair[j];
 			fout << src << " " << dst << " " << triangles << std::endl;
 		}
     }
     fout.close();
-    free(h_triPerEdge);
+    free(h_countsPerPair);
+}
+
+void printResults(triangle_t* d_countsPerPair, unsigned int vStart, unsigned int vEnd, unsigned int nV) {
+    
+    triangle_t* h_countsPerPair;
+    host::allocate(h_countsPerPair, (vEnd-vStart)*nV);
+    gpu::copyToHost(d_countsPerPair, (vEnd-vStart)*nV, h_countsPerPair);
+    for (unsigned int v = vStart; v < vEnd; v++) {
+        for (int i=0; i<nV; i++) {
+            std::cout << "(" << v << "," << i << "): " << h_countsPerPair[(v-vStart)*nV+i] << std::endl; 
+        }
+    }
 }
 
 void commonNeigh::reset(){
-    forAllVertices(hornet, OPERATOR_InitTriangleCounts { triPerEdge, hornet.device_csr_offsets() });
+    //forAllVertices(hornet, OPERATOR_InitTriangleCounts { countsPerPair, hornet.device_csr_offsets() });
 }
 
 void commonNeigh::run() {
@@ -164,10 +171,11 @@ void commonNeigh::run() {
 }
 
 void commonNeigh::run(const int WORK_FACTOR=1){
-    const unsigned int QUEUE_PAIRS_LIMIT = 1E9;
     const unsigned int nV = hornet.nV(); 
+    const unsigned int QUEUE_PAIRS_LIMIT = min(nV*nV, (int)1E9); // allocate memory for pairs up to limit
     vid2_t* vertexPairs = NULL;
-    const unsigned int vStepSize = ceil(QUEUE_PAIRS_LIMIT/nV); // double to avoid underflow from division
+    const unsigned int vStepSize = ceil((double)QUEUE_PAIRS_LIMIT/nV); // double to avoid underflow from division
+    std::cout << "vStepSize: " << vStepSize << std::endl;
     unsigned int vStart = 0;
     unsigned int vEnd = min(vStart + vStepSize, nV); 
     unsigned int queue_size;
@@ -175,6 +183,9 @@ void commonNeigh::run(const int WORK_FACTOR=1){
     vertexPairs = new vid2_t[QUEUE_PAIRS_LIMIT];
     vid2_t* d_vertexPairs = nullptr; 
     gpu::allocate(d_vertexPairs, QUEUE_PAIRS_LIMIT); // could be smaller
+    //triangle_t* d_countsPerPair = nullptr;
+    gpu::allocate(d_countsPerPair, vStepSize*nV);
+    cudaMemset(d_countsPerPair, 0, vStepSize*nV*sizeof(triangle_t)); // initialize pair common neighbor counts to 0
 
     while (vStart < nV) {
         std::cout << "vStart: " << vStart << ", " << "vEnd: " << vEnd << std::endl;
@@ -186,9 +197,11 @@ void commonNeigh::run(const int WORK_FACTOR=1){
        }
        queue_size = (vEnd-vStart)*nV;
        cudaMemcpy(d_vertexPairs, vertexPairs, queue_size*sizeof(vid2_t), cudaMemcpyHostToDevice);
-       forAllAdjUnions(hornet, d_vertexPairs, queue_size, OPERATOR_AdjIntersectionCountBalanced { triPerEdge, hornet.device_csr_offsets() }, WORK_FACTOR); 
+       forAllAdjUnions(hornet, d_vertexPairs, queue_size, OPERATOR_AdjIntersectionCountBalanced { d_countsPerPair, vStart, nV }, WORK_FACTOR); 
+       printResults(d_countsPerPair, vStart, vEnd, nV);
        vStart = vEnd;
        vEnd = min(vEnd+vStepSize, nV);
+       cudaMemset(d_countsPerPair, 0, vStepSize*nV*sizeof(triangle_t)); // initialize pair common neighbor counts to 0
     }
 
     delete [] vertexPairs;
@@ -197,12 +210,12 @@ void commonNeigh::run(const int WORK_FACTOR=1){
 
 
 void commonNeigh::release(){
-    gpu::free(triPerEdge);
-    triPerEdge = nullptr;
+    gpu::free(d_countsPerPair);
+    d_countsPerPair = nullptr;
 }
 
 void commonNeigh::init(){
-    gpu::allocate(triPerEdge, hornet.nE());
+    //gpu::allocate(countsPerPair, hornet.nE());
     reset();
 }
 

@@ -369,8 +369,6 @@ namespace adj_unions {
             } else {
                 bin_index = (METHOD*MAX_ADJ_UNIONS_BINS/2)+(log_u*BINS_1D_DIM+log_v); 
             }
-            //bin_index = MAX_ADJ_UNIONS_BINS/2+((src.id() + dst.id())%(MAX_ADJ_UNIONS_BINS/2));
-            //bin_index = 0;
 
             // Either count or add the item to the appropriate queue position
             if (countOnly)

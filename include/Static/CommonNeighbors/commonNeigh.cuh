@@ -34,7 +34,7 @@ public:
     void writeToFile(char* outPath);
 
 private:
-   triangle_t* triPerEdge { nullptr };
+   triangle_t* d_countsPerPair { nullptr };
 
 };
 
