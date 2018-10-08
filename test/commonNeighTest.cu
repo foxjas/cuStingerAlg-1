@@ -92,8 +92,8 @@ int main(int argc, char* argv[]) {
                            graph.csr_out_edges());
 
     HornetGraph hornet_graph(hornet_init);
-    commonNeigh tc(hornet_graph);
-    tc.init();
+    commonNeigh cn(hornet_graph);
+    cn.init();
     
     const int work_factor = 9999;
 	char* outPath;
@@ -106,16 +106,17 @@ int main(int argc, char* argv[]) {
     //cudaProfilerStart();
     TM.start();
 
-    tc.run(work_factor);
+    cn.run(work_factor);
 
+    TM.stop();
     //cudaProfilerStop();
     TM.print("Computation time:");
 
-    //triangle_t deviceTriangleCount = tc.countTriangles();
+    //triangle_t deviceTriangleCount = cn.countTriangles();
     //printf("Device triangles: %llu\n", deviceTriangleCount);
 
 	if (argc > 2) {	
-		tc.writeToFile(outPath);
+		cn.writeToFile(outPath);
   	}
     return 0;
 }

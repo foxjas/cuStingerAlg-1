@@ -1,7 +1,7 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
-
+#include <Device/Util/Timer.cuh>
 #include "Static/CommonNeighbors/commonNeigh.cuh"
 #include <iostream>
 #include <fstream>
@@ -100,8 +100,12 @@ struct OPERATOR_AdjIntersectionCountBalanced {
                 ui_begin += 1;
             }
         }
-        printf("(%d, %d)\n", u.id(), v.id());
-        eoff_t offset = (u.id()-vertex_offset)*nV+v.id();
+        //printf("(%d, %d)\n", u.id(), v.id());
+        // NOTE: this will error if u > v
+        bool sourceSmaller = u.id() < v.id();
+        vid_t u_id = sourceSmaller ? u.id() : v.id();
+        vid_t v_id = sourceSmaller ? v.id() : u.id(); 
+        eoff_t offset = (u_id-vertex_offset)*nV+v_id;
         atomicAdd(d_countsPerPair+offset, count);
     }
 };
@@ -171,10 +175,13 @@ void commonNeigh::run() {
 }
 
 void commonNeigh::run(const int WORK_FACTOR=1){
+  
+    using namespace timer;
     const unsigned int nV = hornet.nV(); 
-    const unsigned int QUEUE_PAIRS_LIMIT = min(nV*nV, (int)1E9); // allocate memory for pairs up to limit
+    const unsigned int QUEUE_PAIRS_LIMIT = min(nV*nV, (int)5E8); // allocate memory for pairs up to limit
+    std::cout << "QUEUE_PAIRS_LIMIT: " << QUEUE_PAIRS_LIMIT << std::endl;
     vid2_t* vertexPairs = NULL;
-    const unsigned int vStepSize = ceil((double)QUEUE_PAIRS_LIMIT/nV); // double to avoid underflow from division
+    const unsigned int vStepSize = floor((double)QUEUE_PAIRS_LIMIT/nV); // double to avoid underflow from division
     std::cout << "vStepSize: " << vStepSize << std::endl;
     unsigned int vStart = 0;
     unsigned int vEnd = min(vStart + vStepSize, nV); 
@@ -183,20 +190,23 @@ void commonNeigh::run(const int WORK_FACTOR=1){
     vertexPairs = new vid2_t[QUEUE_PAIRS_LIMIT];
     vid2_t* d_vertexPairs = nullptr; 
     gpu::allocate(d_vertexPairs, QUEUE_PAIRS_LIMIT); // could be smaller
-    //triangle_t* d_countsPerPair = nullptr;
     gpu::allocate(d_countsPerPair, vStepSize*nV);
     cudaMemset(d_countsPerPair, 0, vStepSize*nV*sizeof(triangle_t)); // initialize pair common neighbor counts to 0
-
+    Timer<DEVICE> TM(5);
     while (vStart < nV) {
         std::cout << "vStart: " << vStart << ", " << "vEnd: " << vEnd << std::endl;
        // fill array 
+       TM.start();
        for (unsigned int v = vStart; v < vEnd; v++) {
            for (unsigned int index = 0; index < nV; index++) {
-              vertexPairs[v*nV+index] = xlib::make2<vid_t>(v, index);
+              vertexPairs[(v-vStart)*nV+index] = xlib::make2<vid_t>(v, index);
            }
        }
        queue_size = (vEnd-vStart)*nV;
+       std::cout << "queue_size: " << queue_size << std::endl;
        cudaMemcpy(d_vertexPairs, vertexPairs, queue_size*sizeof(vid2_t), cudaMemcpyHostToDevice);
+       TM.stop();
+       TM.print("Creating pairs:");
        forAllAdjUnions(hornet, d_vertexPairs, queue_size, OPERATOR_AdjIntersectionCountBalanced { d_countsPerPair, vStart, nV }, WORK_FACTOR); 
        printResults(d_countsPerPair, vStart, vEnd, nV);
        vStart = vEnd;

@@ -334,7 +334,7 @@ void forAllEdgesKernel(const eoff_t* __restrict__ csr_offsets,
 namespace adj_unions {
     struct queue_info {
         unsigned long long *d_queue_sizes;
-        vid_t *d_edge_queue; // both balanced and imbalanced cases
+        vid_t *d_pairs_queue; // both balanced and imbalanced cases
         unsigned long long *d_queue_pos;
     };
 
@@ -346,7 +346,7 @@ namespace adj_unions {
 
         // Choose the bin to place this edge into
         OPERATOR(Vertex& src, Vertex& dst) {
-            if (src.id() <= dst.id()) // only need to consider half of edges for undirected graph
+            if (src.id() >= dst.id()) // only need to consider half of edges for undirected graph
                 return;
             degree_t src_len = src.degree();
             degree_t dst_len = dst.degree();
@@ -359,7 +359,7 @@ namespace adj_unions {
             int binary_work_est = u_len*log_v;
             int intersect_work_est = u_len + v_len + log_u;
             //const int WORK_FACTOR = 9999; // force imbalanced-only
-            int BALANCED_WORK_LIMIT = BLOCK_SIZE_OP2*(1<<LOG_OFFSET_BALANCED-1);
+            //int BALANCED_WORK_LIMIT = BLOCK_SIZE_OP2*(1<<LOG_OFFSET_BALANCED-1);
             //int METHOD = ((WORK_FACTOR*intersect_work_est >= binary_work_est) || (intersect_work_est > BALANCED_WORK_LIMIT));
             int METHOD = ((WORK_FACTOR*intersect_work_est >= binary_work_est)); 
             if (!METHOD && u_len <= 1) {
@@ -375,8 +375,8 @@ namespace adj_unions {
                 atomicAdd(&(d_queue_info.ptr()->d_queue_sizes[bin_index]), 1ULL);
             else {
                 unsigned long long id = atomicAdd(&(d_queue_info.ptr()->d_queue_pos[bin_index]), 1ULL);
-                d_queue_info.ptr()->d_edge_queue[id*2] = src.id();
-                d_queue_info.ptr()->d_edge_queue[id*2+1] = dst.id();
+                d_queue_info.ptr()->d_pairs_queue[id*2] = src.id();
+                d_queue_info.ptr()->d_pairs_queue[id*2+1] = dst.id();
             }
         }
     };
@@ -388,13 +388,13 @@ void forAllAdjUnions(HornetClass&         hornet,
                      const Operator&      op,
                      const int WORK_FACTOR)
 {
-    forAllAdjUnions(hornet, NULL, 0, op, WORK_FACTOR); 
+    forAllAdjUnions(hornet, NULL, hornet.nE(), op, WORK_FACTOR); 
 }
 
 template<typename HornetClass, typename Operator>
 void forAllAdjUnions(HornetClass&          hornet,
                      vid2_t* __restrict__ vertex_pairs,
-                     unsigned long long vertex_pairs_size,
+                     unsigned long long pairs_queue_size,
                      const Operator&       op,
                      const int WORK_FACTOR)
 {
@@ -407,7 +407,7 @@ void forAllAdjUnions(HornetClass&          hornet,
     TM.start();
 
     // memory allocations host and device side
-    cudaMalloc(&(hd_queue_info().d_edge_queue), 2*hornet.nE()*sizeof(vid_t));
+    cudaMalloc(&(hd_queue_info().d_pairs_queue), 2*pairs_queue_size*sizeof(vid_t)); 
     cudaMalloc(&(hd_queue_info().d_queue_sizes), (MAX_ADJ_UNIONS_BINS)*sizeof(unsigned long long));
     cudaMemset(hd_queue_info().d_queue_sizes, 0, MAX_ADJ_UNIONS_BINS*sizeof(unsigned long long));
     unsigned long long *queue_sizes = (unsigned long long *)calloc(MAX_ADJ_UNIONS_BINS, sizeof(unsigned long long));
@@ -417,10 +417,10 @@ void forAllAdjUnions(HornetClass&          hornet,
 
     // figure out cutoffs/counts per bin
     if (vertex_pairs != NULL)
-        forAllVertexPairs(hornet, vertex_pairs, vertex_pairs_size, bin_edges {hd_queue_info, true, WORK_FACTOR});
+        forAllVertexPairs(hornet, vertex_pairs, pairs_queue_size, bin_edges {hd_queue_info, true, WORK_FACTOR});
     else
         forAllEdgeVertexPairs(hornet, bin_edges {hd_queue_info, true, WORK_FACTOR}, load_balancing);
-
+    
     // copy queue size info to from device to host
     cudaMemcpy(queue_sizes, hd_queue_info().d_queue_sizes, (MAX_ADJ_UNIONS_BINS)*sizeof(unsigned long long), cudaMemcpyDeviceToHost);
     // prefix sum over bin sizes
@@ -433,7 +433,7 @@ void forAllAdjUnions(HornetClass&          hornet,
     */
     // bin edges
     if (vertex_pairs != NULL) 
-        forAllVertexPairs(hornet, vertex_pairs, vertex_pairs_size, bin_edges {hd_queue_info, false, WORK_FACTOR});
+        forAllVertexPairs(hornet, vertex_pairs, pairs_queue_size, bin_edges {hd_queue_info, false, WORK_FACTOR});
     else
         forAllEdgeVertexPairs(hornet, bin_edges {hd_queue_info, false, WORK_FACTOR}, load_balancing);
 
@@ -465,7 +465,7 @@ void forAllAdjUnions(HornetClass&          hornet,
             threads_per = 1 << (threads_log-1); 
             printf("threads_per=%d, size=%d\n", threads_per, size);
             TM.start();
-            forAllEdgesAdjUnionBalanced(hornet, hd_queue_info().d_edge_queue, start_index, end_index, op, threads_per, 0);
+            forAllEdgesAdjUnionBalanced(hornet, hd_queue_info().d_pairs_queue, start_index, end_index, op, threads_per, 0);
             TM.stop();
             TM.print("balanced queue processing:");
             TM.reset();
@@ -481,7 +481,7 @@ void forAllAdjUnions(HornetClass&          hornet,
         threads_per = 1 << (threads_log-1); 
         printf("threads_per=%d, size=%d\n", threads_per, size);
         TM.start();
-        forAllEdgesAdjUnionBalanced(hornet, hd_queue_info().d_edge_queue, start_index, end_index, op, threads_per, 0);
+        forAllEdgesAdjUnionBalanced(hornet, hd_queue_info().d_pairs_queue, start_index, end_index, op, threads_per, 0);
         TM.stop();
         TM.print("balanced queue processing:");
         TM.reset();
@@ -489,9 +489,12 @@ void forAllAdjUnions(HornetClass&          hornet,
     start_index = end_index;
 
     // imbalanced kernel
+
     const int IMBALANCED_THREADS_LOGMAX = BINS_1D_DIM-1; 
     bin_offset = MAX_ADJ_UNIONS_BINS/2;
     threads_log = 1;
+
+    TM.start();
     while ((threads_log < IMBALANCED_THREADS_LOGMAX) && (threads_log+LOG_OFFSET_IMBALANCED < BINS_1D_DIM)) 
     {
         bin_index = bin_offset+(threads_log+LOG_OFFSET_IMBALANCED)*BINS_1D_DIM;
@@ -499,13 +502,13 @@ void forAllAdjUnions(HornetClass&          hornet,
         size = end_index - start_index;
         if (size) {
             threads_per = 1 << (threads_log-1); 
-            printf("threads_per=%d, size=%d\n", threads_per, size);
+            //printf("threads_per=%d, size=%d\n", threads_per, size);
             //printf("bin_index=%d, start_index=%d, end_index=%d\n", bin_index, start_index, end_index);
-            TM.start();
-            forAllEdgesAdjUnionImbalanced(hornet, hd_queue_info().d_edge_queue, start_index, end_index, op, threads_per, 1);
-            TM.stop();
-            TM.print("imbalanced queue processing:");
-            TM.reset();
+            //TM.start();
+            forAllEdgesAdjUnionImbalanced(hornet, hd_queue_info().d_pairs_queue, start_index, end_index, op, threads_per, 1);
+            //TM.stop();
+            //TM.print("imbalanced queue processing:");
+            //TM.reset();
         }
         start_index = end_index;
         threads_log += 1;
@@ -518,16 +521,23 @@ void forAllAdjUnions(HornetClass&          hornet,
         //printf("(start_index, end_index): %d, %d\n", start_index, end_index);
         //printf("threads_log, bin_index: %d, %d\n", threads_log, bin_index);
         threads_per = 1 << (threads_log-1); 
-        printf("threads_per: %d, size: %d\n", threads_per, size);
-        TM.start();
-        forAllEdgesAdjUnionImbalanced(hornet, hd_queue_info().d_edge_queue, start_index, end_index, op, threads_per, 1);
-        TM.stop();
-        TM.print("imbalanced queue processing:");
-        TM.reset();
+        //printf("threads_per: %d, size: %d\n", threads_per, size);
+        //TM.start();
+        forAllEdgesAdjUnionImbalanced(hornet, hd_queue_info().d_pairs_queue, start_index, end_index, op, threads_per, 1);
+        //TM.stop();
+        //TM.print("imbalanced queue processing:");
+        //TM.reset();
     }
 
+    TM.stop();
+    TM.print("queue processing:");
+    
+    //free remaining memory
     free(queue_sizes);
     free(queue_pos);
+    cudaFree(hd_queue_info().d_pairs_queue);
+    cudaFree(hd_queue_info().d_queue_pos);
+    cudaFree(hd_queue_info().d_queue_sizes);
 }
 
 
@@ -603,10 +613,10 @@ void forAll(const TwoLevelQueue<T>& queue, const Operator& op) {
 template<typename HornetClass, typename T, typename Operator>
 void forAllVertexPairs(HornetClass&            hornet,
                        T* __restrict__ vertex_pairs,
-                       unsigned long long vertex_pairs_size,
+                       unsigned long long pairs_queue_size,
                        const Operator&         op) {
 
-    auto size = vertex_pairs_size; 
+    auto size = pairs_queue_size; 
     if (size == 0)
         return;
     detail::forAllVertexPairsKernel
