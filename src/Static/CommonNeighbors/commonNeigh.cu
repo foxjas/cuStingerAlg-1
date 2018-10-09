@@ -112,12 +112,6 @@ struct OPERATOR_AdjIntersectionCountBalanced {
     }
 };
 
-/*
-typedef std::tuple<vid_t,vid_t,triangle_t> mytuple;
-bool decreasingComparator( const mytuple& l, const mytuple& r) {
-	return std::get<2>(l)> std::get<2>(r); 
-}
-*/
 typedef struct tuple {
 	vid_t u;
 	vid_t v;
@@ -129,7 +123,7 @@ bool decreasingComparator( mytuple& l, const mytuple& r) {
 	return l.count > r.count; 
 }
     
-void topK(triangle_t* countsPerPair, vid_t vStart, vid_t vEnd, vid_t nV, int K) {
+std::vector<mytuple> topK(triangle_t* countsPerPair, vid_t vStart, vid_t vEnd, vid_t nV, int K, bool verbose=false) {
 	//std::vector<mytuple> indexedCounts;
 	std::vector<mytuple> indexedCounts;
 
@@ -139,17 +133,22 @@ void topK(triangle_t* countsPerPair, vid_t vStart, vid_t vEnd, vid_t nV, int K) 
 			indexedCounts.push_back(pair_count);
 		} 
 	}
-	std::cout << "indexedCounts size: " << indexedCounts.size() << std::endl;	
+	//std::cout << "indexedCounts size: " << indexedCounts.size() << std::endl;	
 	// consider using std::nth_element instead
-	std::sort(indexedCounts.begin(), indexedCounts.end(), decreasingComparator);
-	for (int i=0; i<K; i++) {
-		/*vid_t u = std::get<0>(indexedCounts[i]);
-		vid_t v = std::get<1>(indexedCounts[i]);
-		triangle_t count = std::get<2>(indexedCounts[i]);
-		*/
-		mytuple t = indexedCounts[i];
-		std::cout << "(" << t.u << "," << t.v << "): " << t.count << std::endl;
-	}
+    
+	//std::sort(indexedCounts.begin(), indexedCounts.end(), decreasingComparator);
+    //std::vector<mytuple> top_k(&indexedCounts[0], &indexedCounts[K]);
+    std::nth_element(indexedCounts.begin(), indexedCounts.begin()+K, indexedCounts.end(), decreasingComparator);
+    std::vector<mytuple> top_k(&indexedCounts[0], &indexedCounts[K]);
+	std::sort(top_k.begin(), top_k.end(), decreasingComparator);
+    if (verbose) {
+        for (int i=0; i<K; i++) {
+            //mytuple t = indexedCounts[i];
+            mytuple t = top_k[i];
+            std::cout << "(" << t.u << "," << t.v << "): " << t.count << std::endl;
+        }
+    }
+    return top_k;
 }
 
 triangle_t commonNeigh::countTriangles(){
@@ -215,6 +214,7 @@ void commonNeigh::run() {
 void commonNeigh::run(const int WORK_FACTOR=1){
   
     using namespace timer;
+    const unsigned int K = 10;
     const unsigned int nV = hornet.nV(); 
     const unsigned int QUEUE_PAIRS_LIMIT = min(nV*nV, (int)5E8); // allocate memory for pairs up to limit
     std::cout << "QUEUE_PAIRS_LIMIT: " << QUEUE_PAIRS_LIMIT << std::endl;
@@ -230,9 +230,10 @@ void commonNeigh::run(const int WORK_FACTOR=1){
     gpu::allocate(d_vertexPairs, QUEUE_PAIRS_LIMIT); // could be smaller
     gpu::allocate(d_countsPerPair, vStepSize*nV);
     cudaMemset(d_countsPerPair, 0, vStepSize*nV*sizeof(triangle_t)); // initialize pair common neighbor counts to 0
+    std::vector<mytuple> top_k;
     Timer<DEVICE> TM(5);
     while (vStart < nV) {
-        std::cout << "vStart: " << vStart << ", " << "vEnd: " << vEnd << std::endl;
+        //std::cout << "vStart: " << vStart << ", " << "vEnd: " << vEnd << std::endl;
        // fill array 
        TM.start();
        // could cut memory requirements by ~half if we enforce (u < v)
@@ -242,7 +243,7 @@ void commonNeigh::run(const int WORK_FACTOR=1){
            }
        }
        queue_size = (vEnd-vStart)*nV;
-       std::cout << "queue_size: " << queue_size << std::endl;
+       //std::cout << "queue_size: " << queue_size << std::endl;
        cudaMemcpy(d_vertexPairs, vertexPairs, queue_size*sizeof(vid2_t), cudaMemcpyHostToDevice);
        TM.stop();
        TM.print("Creating pairs:");
@@ -252,13 +253,25 @@ void commonNeigh::run(const int WORK_FACTOR=1){
        host::allocate(h_countsPerPair, (vEnd-vStart)*nV);
        gpu::copyToHost(d_countsPerPair, (vEnd-vStart)*nV, h_countsPerPair);
        //printResults(h_countsPerPair, vStart, vEnd, nV);
-	   topK(h_countsPerPair, vStart, vEnd, nV, 10);
+       // logic for top_k calculations
+       std::vector<mytuple> partition_top_k = topK(h_countsPerPair, vStart, vEnd, nV, K);
+       std::vector<mytuple> temp;
+       temp.reserve(partition_top_k.size() + top_k.size());
+       temp.insert(temp.end(), top_k.begin(), top_k.end());
+       temp.insert(temp.end(), partition_top_k.begin(), partition_top_k.end());
+       std::sort(temp.begin(), temp.end(), decreasingComparator);
+       top_k.assign(temp.begin(), temp.begin()+K);
 
        vStart = vEnd;
        vEnd = min(vEnd+vStepSize, nV);
        cudaMemset(d_countsPerPair, 0, vStepSize*nV*sizeof(triangle_t)); // initialize pair common neighbor counts to 0
     }
-
+    for (int i=0; i<K; i++) {
+        //mytuple t = indexedCounts[i];
+        mytuple t = top_k[i];
+        std::cout << "(" << t.u << "," << t.v << "): " << t.count << std::endl;
+    }
+    
     delete [] vertexPairs;
     gpu::free(d_vertexPairs);
 }
