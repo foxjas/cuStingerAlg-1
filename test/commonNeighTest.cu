@@ -49,7 +49,7 @@ int hostSingleIntersection (const vid_t ai, const degree_t alen, const vid_t * a
     return out;
 }
 
-void hostCountTriangles (const vid_t nv, const vid_t ne, const eoff_t * off,
+void hostCountCommonNeighbors(const vid_t nv, const vid_t ne, const eoff_t * off,
     const vid_t * ind, int64_t* allTriangles)
 {
     int32_t edge=0;

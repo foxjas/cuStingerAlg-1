@@ -5,7 +5,9 @@
 #include "Static/CommonNeighbors/commonNeigh.cuh"
 #include <iostream>
 #include <fstream>
-#include <math.h> 
+#include <math.h>
+//#include <tuple>
+#include <vector>
 
 namespace hornets_nest {
 
@@ -110,6 +112,45 @@ struct OPERATOR_AdjIntersectionCountBalanced {
     }
 };
 
+/*
+typedef std::tuple<vid_t,vid_t,triangle_t> mytuple;
+bool decreasingComparator( const mytuple& l, const mytuple& r) {
+	return std::get<2>(l)> std::get<2>(r); 
+}
+*/
+typedef struct tuple {
+	vid_t u;
+	vid_t v;
+	triangle_t count;
+	tuple(vid_t v1, vid_t v2, triangle_t neighCount) : u(v1), v(v2), count(neighCount) { } 
+} mytuple;
+
+bool decreasingComparator( mytuple& l, const mytuple& r) {
+	return l.count > r.count; 
+}
+    
+void topK(triangle_t* countsPerPair, vid_t vStart, vid_t vEnd, vid_t nV, int K) {
+	//std::vector<mytuple> indexedCounts;
+	std::vector<mytuple> indexedCounts;
+
+	for (vid_t u=vStart; u<vEnd; u++) {
+		for (vid_t v = u+1; v<nV; v++) {
+			mytuple pair_count = mytuple(u, v, countsPerPair[(u-vStart)*nV+v]);
+			indexedCounts.push_back(pair_count);
+		} 
+	}
+	std::cout << "indexedCounts size: " << indexedCounts.size() << std::endl;	
+	// consider using std::nth_element instead
+	std::sort(indexedCounts.begin(), indexedCounts.end(), decreasingComparator);
+	for (int i=0; i<K; i++) {
+		/*vid_t u = std::get<0>(indexedCounts[i]);
+		vid_t v = std::get<1>(indexedCounts[i]);
+		triangle_t count = std::get<2>(indexedCounts[i]);
+		*/
+		mytuple t = indexedCounts[i];
+		std::cout << "(" << t.u << "," << t.v << "): " << t.count << std::endl;
+	}
+}
 
 triangle_t commonNeigh::countTriangles(){
 
@@ -154,14 +195,11 @@ void commonNeigh::writeToFile(char* outPath) {
     free(h_countsPerPair);
 }
 
-void printResults(triangle_t* d_countsPerPair, unsigned int vStart, unsigned int vEnd, unsigned int nV) {
+void printResults(triangle_t* countsPerPair, unsigned int vStart, unsigned int vEnd, unsigned int nV) {
     
-    triangle_t* h_countsPerPair;
-    host::allocate(h_countsPerPair, (vEnd-vStart)*nV);
-    gpu::copyToHost(d_countsPerPair, (vEnd-vStart)*nV, h_countsPerPair);
     for (unsigned int v = vStart; v < vEnd; v++) {
         for (int i=0; i<nV; i++) {
-            std::cout << "(" << v << "," << i << "): " << h_countsPerPair[(v-vStart)*nV+i] << std::endl; 
+            std::cout << "(" << v << "," << i << "): " << countsPerPair[(v-vStart)*nV+i] << std::endl; 
         }
     }
 }
@@ -197,6 +235,7 @@ void commonNeigh::run(const int WORK_FACTOR=1){
         std::cout << "vStart: " << vStart << ", " << "vEnd: " << vEnd << std::endl;
        // fill array 
        TM.start();
+       // could cut memory requirements by ~half if we enforce (u < v)
        for (unsigned int v = vStart; v < vEnd; v++) {
            for (unsigned int index = 0; index < nV; index++) {
               vertexPairs[(v-vStart)*nV+index] = xlib::make2<vid_t>(v, index);
@@ -208,7 +247,13 @@ void commonNeigh::run(const int WORK_FACTOR=1){
        TM.stop();
        TM.print("Creating pairs:");
        forAllAdjUnions(hornet, d_vertexPairs, queue_size, OPERATOR_AdjIntersectionCountBalanced { d_countsPerPair, vStart, nV }, WORK_FACTOR); 
-       printResults(d_countsPerPair, vStart, vEnd, nV);
+
+       triangle_t* h_countsPerPair;
+       host::allocate(h_countsPerPair, (vEnd-vStart)*nV);
+       gpu::copyToHost(d_countsPerPair, (vEnd-vStart)*nV, h_countsPerPair);
+       //printResults(h_countsPerPair, vStart, vEnd, nV);
+	   topK(h_countsPerPair, vStart, vEnd, nV, 10);
+
        vStart = vEnd;
        vEnd = min(vEnd+vStepSize, nV);
        cudaMemset(d_countsPerPair, 0, vStepSize*nV*sizeof(triangle_t)); // initialize pair common neighbor counts to 0
