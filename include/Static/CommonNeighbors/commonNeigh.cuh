@@ -34,6 +34,7 @@ public:
     void writeToFile(char* outPath);
 
 private:
+   TwoLevelQueue<vid2_t>        queue;
    triangle_t* d_countsPerPair { nullptr };
 
 };

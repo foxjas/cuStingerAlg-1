@@ -20,20 +20,23 @@ commonNeigh::commonNeigh(HornetGraph& hornet) :
 commonNeigh::~commonNeigh(){
     release();
 }
-/*
-struct OPERATOR_InitPairCommonNeighCounts {
-    triangle_t *d_countsPerPair;
-    // usage in ForAllEdges preferable, but unclear how to get dst index in adjacency
-    OPERATOR (Vertex &vertex) {
-        degree_t degree = vertex.degree();
-        for (int i=0; i<degree; i++) {
-            eoff_t src_offset = d_offsets[vertex.id()];
-            //d_countsPerPair[src_offset+i] = 1; // test: total count should = |E|
-            d_countsPerPair[src_offset+i] = 0; 
+
+struct OPERATOR_InitPairs {
+    TwoLevelQueue<vid2_t> queue;
+    unsigned int vStart;
+    //vid_t vEnd;
+    const unsigned int nV;
+
+    OPERATOR (int tid) {
+        vid_t vid1 = tid / nV;
+        vid_t vid2 = tid % nV;
+        if (vid1 < vid2) {
+            //printf("tid: %d, (%d, %d)\n",tid,vid1,vid2);
+            queue.insert(xlib::make2<vid_t>(vStart+vid1, vid2));
         }
     }
 };
-*/
+
 
 /*
  * Search for position of key in array
@@ -224,10 +227,8 @@ void commonNeigh::run(const int WORK_FACTOR=1){
     unsigned int vStart = 0;
     unsigned int vEnd = min(vStart + vStepSize, nV); 
     unsigned int queue_size;
-
-    vertexPairs = new vid2_t[QUEUE_PAIRS_LIMIT];
-    vid2_t* d_vertexPairs = nullptr; 
-    gpu::allocate(d_vertexPairs, QUEUE_PAIRS_LIMIT); // could be smaller
+    
+    queue.initialize(static_cast<size_t>(vStepSize*nV));
     gpu::allocate(d_countsPerPair, vStepSize*nV);
     cudaMemset(d_countsPerPair, 0, vStepSize*nV*sizeof(triangle_t)); // initialize pair common neighbor counts to 0
     std::vector<mytuple> top_k;
@@ -236,15 +237,12 @@ void commonNeigh::run(const int WORK_FACTOR=1){
         //std::cout << "vStart: " << vStart << ", " << "vEnd: " << vEnd << std::endl;
        // fill array 
        TM.start();
-       // could cut memory requirements by ~half if we enforce (u < v)
-       for (unsigned int v = vStart; v < vEnd; v++) {
-           for (unsigned int index = 0; index < nV; index++) {
-              vertexPairs[(v-vStart)*nV+index] = xlib::make2<vid_t>(v, index);
-           }
-       }
-       queue_size = (vEnd-vStart)*nV;
-       //std::cout << "queue_size: " << queue_size << std::endl;
-       cudaMemcpy(d_vertexPairs, vertexPairs, queue_size*sizeof(vid2_t), cudaMemcpyHostToDevice);
+       //TODO: try setting pairs using forAll 
+       forAll(static_cast<size_t>((vEnd-vStart)*nV), OPERATOR_InitPairs { queue, vStart, nV });
+       queue.swap(); // needed here 
+       const vid2_t* d_vertexPairs = queue.device_input_ptr();
+       queue_size = queue.size();
+       std::cout << "queue_size: " << queue_size << std::endl;
        TM.stop();
        TM.print("Creating pairs:");
        forAllAdjUnions(hornet, d_vertexPairs, queue_size, OPERATOR_AdjIntersectionCountBalanced { d_countsPerPair, vStart, nV }, WORK_FACTOR); 
@@ -272,8 +270,6 @@ void commonNeigh::run(const int WORK_FACTOR=1){
         std::cout << "(" << t.u << "," << t.v << "): " << t.count << std::endl;
     }
     
-    delete [] vertexPairs;
-    gpu::free(d_vertexPairs);
 }
 
 
