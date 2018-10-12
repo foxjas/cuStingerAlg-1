@@ -35,6 +35,7 @@ public:
 
 private:
    TwoLevelQueue<vid2_t>        queue;
+   load_balancing::BinarySearch load_balancing; // vertex-based?
    triangle_t* d_countsPerPair { nullptr };
 
 };

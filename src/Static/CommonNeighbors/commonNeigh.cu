@@ -11,9 +11,11 @@
 
 namespace hornets_nest {
 
-commonNeigh::commonNeigh(HornetGraph& hornet) :
-                                       StaticAlgorithm(hornet)
+const int UNSET = -1; 
 
+commonNeigh::commonNeigh(HornetGraph& hornet) :
+                                       StaticAlgorithm(hornet),
+                                       load_balancing(hornet)
 {                                       
 }
 
@@ -37,6 +39,53 @@ struct OPERATOR_InitPairs {
     }
 };
 
+/*
+ * Fills queue with vertices' ids in a subset range
+ */
+struct OPERATOR_InitVertexSubset {
+    TwoLevelQueue<vid_t> queue;
+    unsigned int vStart;
+    //unsigned int vEnd;
+
+    OPERATOR (int tid) {
+        queue.insert(vStart+tid);
+    }
+};
+
+/*
+ * Initializes vertex pairs from all length 2 chains
+ * ForAllEdges operator
+ * Perf. optimization could be setting value to src_id + nV, in atomicCAS
+ */
+struct OPERATOR_InitPairsFromChains {
+    TwoLevelQueue<vid2_t> uniquePairs;
+	int* d_pairsVisited;	
+    unsigned int vStart;
+    //vid_t vEnd;
+    const unsigned int nV;
+
+	OPERATOR(Vertex& vertex, Edge& edge) {
+		vid_t src_id = vertex.id();
+		Vertex dst = edge.dst();
+		for (int i=0; i<dst.degree(); i++) {
+			vid_t dst_neighb_id = dst.neighbor_id(i); 
+            if (dst_neighb_id == src_id) 
+                continue;
+
+			// atomic compare and swap on d_pairsVisited;
+            int dst_neigh_offset = (src_id - vStart)*nV + dst_neighb_id;
+            //printf("(%d, %d, %d, %d)\n", src_id, dst.id(), dst_neighb_id, dst_neigh_offset);
+            //int old_val = atomicCAS(d_pairsVisited+dst_neigh_offset, UNSET, (int)src_id);
+
+            int old_val = atomicCAS(d_pairsVisited+dst_neigh_offset, UNSET, (int)src_id);
+            //printf("(%d, %d, %d, %d)\n", src_id, dst.id(), dst_neighb_id, old_val); 
+			if (old_val != src_id) {
+                //printf("(%d, %d)\n", src_id, dst_neighb_id);
+				uniquePairs.insert(xlib::make2<vid_t>(src_id, dst_neighb_id));
+			}
+		}
+    }
+};
 
 /*
  * Search for position of key in array
@@ -221,7 +270,6 @@ void commonNeigh::run(const int WORK_FACTOR=1){
     const unsigned int nV = hornet.nV(); 
     const unsigned int QUEUE_PAIRS_LIMIT = min(nV*nV, (int)5E8); // allocate memory for pairs up to limit
     std::cout << "QUEUE_PAIRS_LIMIT: " << QUEUE_PAIRS_LIMIT << std::endl;
-    vid2_t* vertexPairs = NULL;
     const unsigned int vStepSize = floor((double)QUEUE_PAIRS_LIMIT/nV); // double to avoid underflow from division
     std::cout << "vStepSize: " << vStepSize << std::endl;
     unsigned int vStart = 0;
@@ -229,17 +277,26 @@ void commonNeigh::run(const int WORK_FACTOR=1){
     unsigned int queue_size;
     
     queue.initialize(static_cast<size_t>(vStepSize*nV));
+    TwoLevelQueue<vid_t> activeVertices(static_cast<size_t>(vStepSize));
+
     gpu::allocate(d_countsPerPair, vStepSize*nV);
     cudaMemset(d_countsPerPair, 0, vStepSize*nV*sizeof(triangle_t)); // initialize pair common neighbor counts to 0
+    int* d_pairsVisited;
+    gpu::allocate(d_pairsVisited, vStepSize*nV);
+    cudaMemset(d_pairsVisited, UNSET, vStepSize*nV*sizeof(int)); // initialize pair common neighbor counts to 0
     std::vector<mytuple> top_k;
     Timer<DEVICE> TM(5);
     while (vStart < nV) {
         //std::cout << "vStart: " << vStart << ", " << "vEnd: " << vEnd << std::endl;
        // fill array 
        TM.start();
-       //TODO: try setting pairs using forAll 
-       forAll(static_cast<size_t>((vEnd-vStart)*nV), OPERATOR_InitPairs { queue, vStart, nV });
+       forAll(static_cast<size_t>(vEnd-vStart), OPERATOR_InitVertexSubset { activeVertices, vStart });
+       activeVertices.swap();
+       std::cout << "active vertices size: " << activeVertices.size() << std::endl;
+
+       forAllEdges(hornet, activeVertices, OPERATOR_InitPairsFromChains { queue, d_pairsVisited, vStart, nV }, load_balancing);
        queue.swap(); // needed here 
+
        const vid2_t* d_vertexPairs = queue.device_input_ptr();
        queue_size = queue.size();
        std::cout << "queue_size: " << queue_size << std::endl;
@@ -262,6 +319,8 @@ void commonNeigh::run(const int WORK_FACTOR=1){
 
        vStart = vEnd;
        vEnd = min(vEnd+vStepSize, nV);
+
+       cudaMemset(d_pairsVisited, UNSET, (vEnd-vStart)*nV*sizeof(int)); // initialize pair common neighbor counts to 0
        cudaMemset(d_countsPerPair, 0, vStepSize*nV*sizeof(triangle_t)); // initialize pair common neighbor counts to 0
     }
     for (int i=0; i<K; i++) {
@@ -269,6 +328,8 @@ void commonNeigh::run(const int WORK_FACTOR=1){
         mytuple t = top_k[i];
         std::cout << "(" << t.u << "," << t.v << "): " << t.count << std::endl;
     }
+    
+    gpu::free(d_pairsVisited); // TODO: move into release()
     
 }
 
