@@ -23,6 +23,22 @@ commonNeigh::~commonNeigh(){
     release();
 }
 
+/*
+ * Fills queue with vertices' ids in a subset range
+ */
+struct OPERATOR_InitVertexSubset {
+    TwoLevelQueue<vid_t> queue;
+    unsigned int vStart;
+    //unsigned int vEnd;
+
+    OPERATOR (int tid) {
+        queue.insert(vStart+tid);
+    }
+};
+
+/**
+ * Operator to initialize all-pairs
+ */
 struct OPERATOR_InitPairs {
     TwoLevelQueue<vid2_t> queue;
     unsigned int vStart;
@@ -39,18 +55,6 @@ struct OPERATOR_InitPairs {
     }
 };
 
-/*
- * Fills queue with vertices' ids in a subset range
- */
-struct OPERATOR_InitVertexSubset {
-    TwoLevelQueue<vid_t> queue;
-    unsigned int vStart;
-    //unsigned int vEnd;
-
-    OPERATOR (int tid) {
-        queue.insert(vStart+tid);
-    }
-};
 
 /*
  * Initializes vertex pairs from all length 2 chains
@@ -74,13 +78,8 @@ struct OPERATOR_InitPairsFromChains {
 
 			// atomic compare and swap on d_pairsVisited;
             int dst_neigh_offset = (src_id - vStart)*nV + dst_neighb_id;
-            //printf("(%d, %d, %d, %d)\n", src_id, dst.id(), dst_neighb_id, dst_neigh_offset);
-            //int old_val = atomicCAS(d_pairsVisited+dst_neigh_offset, UNSET, (int)src_id);
-
             int old_val = atomicCAS(d_pairsVisited+dst_neigh_offset, UNSET, (int)src_id);
-            //printf("(%d, %d, %d, %d)\n", src_id, dst.id(), dst_neighb_id, old_val); 
 			if (old_val != src_id) {
-                //printf("(%d, %d)\n", src_id, dst_neighb_id);
 				uniquePairs.insert(xlib::make2<vid_t>(src_id, dst_neighb_id));
 			}
 		}
@@ -288,7 +287,6 @@ void commonNeigh::run(const int WORK_FACTOR=1){
     Timer<DEVICE> TM(5);
     while (vStart < nV) {
         //std::cout << "vStart: " << vStart << ", " << "vEnd: " << vEnd << std::endl;
-       // fill array 
        TM.start();
        forAll(static_cast<size_t>(vEnd-vStart), OPERATOR_InitVertexSubset { activeVertices, vStart });
        activeVertices.swap();
@@ -320,7 +318,7 @@ void commonNeigh::run(const int WORK_FACTOR=1){
        vStart = vEnd;
        vEnd = min(vEnd+vStepSize, nV);
 
-       cudaMemset(d_pairsVisited, UNSET, (vEnd-vStart)*nV*sizeof(int)); // initialize pair common neighbor counts to 0
+       cudaMemset(d_pairsVisited, UNSET, (vEnd-vStart)*nV*sizeof(int)); // unset "visited" pairs 
        cudaMemset(d_countsPerPair, 0, vStepSize*nV*sizeof(triangle_t)); // initialize pair common neighbor counts to 0
     }
     for (int i=0; i<K; i++) {
