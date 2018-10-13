@@ -407,6 +407,8 @@ void forAllAdjUnions(HornetClass&          hornet,
     HostDeviceVar<queue_info> hd_queue_info;
 
     load_balancing::VertexBased1 load_balancing ( hornet );
+    
+    //load_balancing::BinarySearch load_balancing ( hornet );
 
     timer::Timer<timer::DEVICE> TM(5);
     TM.start();
