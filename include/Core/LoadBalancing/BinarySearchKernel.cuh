@@ -91,6 +91,25 @@ void binarySearchKernel(HornetDevice              hornet,
     xlib::binarySearchLB<BLOCK_SIZE>(d_work, work_size, xlib::dyn_smem, lambda);
 }
 
+
+template<unsigned BLOCK_SIZE,
+         typename HornetDevice, typename Operator>
+__global__
+void binarySearchVertexPairsKernel(HornetDevice              hornet,
+                        const int*   __restrict__ d_work,
+                        int                       work_size,
+                        Operator                  op) {
+
+    const auto& lambda = [&](int pos, degree_t offset) {
+                            const auto& vertex = hornet.vertex(pos);
+                            const auto&   edge = vertex.edge(offset);
+                            const auto& dst = hornet.vertex(edge.dst_id());
+                            op(vertex, dst);
+                        };
+    xlib::binarySearchLB<BLOCK_SIZE>(d_work, work_size, xlib::dyn_smem, lambda);
+}
+
+
 } // namespace kernel
 } // namespace load_balancing
 } // namespace hornets_nest

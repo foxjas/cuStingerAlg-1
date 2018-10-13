@@ -38,6 +38,7 @@
  */
 #pragma once
 
+#include <Device/Primitives/CubWrapper.cuh>  //xlib::CubExclusiveSum
 #include "Core/Queue/TwoLevelQueue.cuh"
 
 namespace hornets_nest {
@@ -82,6 +83,9 @@ public:
 
     template<typename HornetClass, typename Operator>
     void apply(const HornetClass& hornet, const Operator& op) const noexcept;
+
+    template<typename HornetClass, typename Operator>
+    void applyVertexPairs(const HornetClass& hornet, Operator&& op) const noexcept;
 
 private:
     static const unsigned BLOCK_SIZE = 128;
