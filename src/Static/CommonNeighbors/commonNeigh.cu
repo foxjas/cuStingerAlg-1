@@ -35,6 +35,34 @@ struct OPERATOR_InitVertexSubset {
     }
 };
 
+
+struct OPERATOR_InitPairsData {
+	int* d_pairsVisited;	
+    count_t *d_countsPerPair;
+    unsigned int vStart;
+    const unsigned int nV;
+
+	OPERATOR(Vertex& vertex, Edge& edge) {
+		vid_t src_id = vertex.id();
+		Vertex dst = edge.dst();
+
+		for (int i=dst.degree(); i>= 0; i--) {
+			vid_t dst_neighb_id = dst.neighbor_id(i); 
+
+            printf("(%d, %d, %d)\n", src_id, dst.id(), dst_neighb_id);
+            // enforcing dst neighbor > src
+            // early termination for sorted adjacency
+            if (dst_neighb_id <= src_id) 
+                break;
+
+            int dst_neigh_offset = (src_id - vStart)*nV + dst_neighb_id;
+            //printf("(%d, %d, %d)\n", src_id, dst.id(), dst_neighb_id);
+            d_pairsVisited[dst_neigh_offset] = UNSET; 
+            d_countsPerPair[dst_neigh_offset] = 0;
+		}
+    }
+};
+
 /*
  * Initializes vertex pairs from all length 2 chains
  * ForAllEdges operator
@@ -252,10 +280,8 @@ void commonNeigh::run(const int WORK_FACTOR=9999, bool isTopK=false){
     TwoLevelQueue<vid_t> activeVertices(static_cast<size_t>(vStepSize));
 
     gpu::allocate(d_countsPerPair, vStepSize*nV);
-    cudaMemset(d_countsPerPair, 0, vStepSize*nV*sizeof(count_t)); // initialize pair common neighbor counts to 0
     int* d_pairsVisited;
     gpu::allocate(d_pairsVisited, vStepSize*nV);
-    cudaMemset(d_pairsVisited, UNSET, vStepSize*nV*sizeof(int)); // initialize pair common neighbor counts to 0
     std::vector<mytuple> top_k;
     Timer<DEVICE> TM(5);
     while (vStart < nV) {
@@ -265,6 +291,7 @@ void commonNeigh::run(const int WORK_FACTOR=9999, bool isTopK=false){
        activeVertices.swap();
        std::cout << "active vertices size: " << activeVertices.size() << std::endl;
 
+       forAllEdges(hornet, activeVertices, OPERATOR_InitPairsData { d_pairsVisited, d_countsPerPair, vStart, nV }, load_balancing);
        forAllEdges(hornet, activeVertices, OPERATOR_InitPairsFromChains { queue, d_pairsVisited, vStart, nV }, load_balancing);
        queue.swap(); // needed here 
 
@@ -293,12 +320,11 @@ void commonNeigh::run(const int WORK_FACTOR=9999, bool isTopK=false){
        vStart = vEnd;
        vEnd = min(vEnd+vStepSize, nV);
 
-		
+	   /*	
        TM.start();
-       cudaMemset(d_pairsVisited, UNSET, (vEnd-vStart)*nV*sizeof(int)); // unset "visited" pairs 
-       cudaMemset(d_countsPerPair, 0, vStepSize*nV*sizeof(count_t)); // initialize pair common neighbor counts to 0
        TM.stop();
        TM.print("Resetting memory:");
+       */
     }
 
     if (isTopK) {
