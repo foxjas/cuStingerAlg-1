@@ -104,5 +104,26 @@ void BinarySearch::apply(const HornetClass& hornet, const Operator& op)
     CHECK_CUDA_ERROR
 }
 
+
+template<typename HornetClass, typename Operator>
+void BinarySearch::applyVertexPairs(const HornetClass& hornet, Operator&& op)
+                                       const noexcept {
+
+    static_assert(IsHornet<HornetClass>::value,
+                 "BinarySearch: paramenter is not an instance of Hornet Class");
+
+    int ITEMS_PER_BLOCK = xlib::DeviceProperty
+                          ::smem_per_block<vid_t>(BLOCK_SIZE);
+    auto  DYN_SMEM_SIZE = ITEMS_PER_BLOCK * sizeof(vid_t);
+
+    unsigned grid_size = xlib::ceil_div(hornet.nE(), ITEMS_PER_BLOCK);
+
+    kernel::binarySearchVertexPairsKernel<BLOCK_SIZE>
+        <<< grid_size, BLOCK_SIZE, DYN_SMEM_SIZE >>>
+        (hornet.device_side(), hornet.device_csr_offsets(),
+         hornet.nV() + 1, op);
+    CHECK_CUDA_ERROR
+}
+
 } // namespace load_balancing
 } // namespace hornets_nest
