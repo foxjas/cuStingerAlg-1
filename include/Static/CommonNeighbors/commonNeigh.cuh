@@ -10,8 +10,7 @@
 
 namespace hornets_nest {
 
-//using triangle_t = int;
-using triangle_t = unsigned long long;
+using count_t = unsigned long long;
 using HornetGraph = gpu::Hornet<EMPTY, EMPTY>;
 
 
@@ -27,15 +26,16 @@ public:
     void release()  override;
     bool validate() override { return true; }
 
-    void run(const int WORK_FACTOR);
+    void run(const int WORK_FACTOR, bool isTopK);
     void init();
 
-    triangle_t countTriangles();
+    count_t countTriangles();
     void writeToFile(char* outPath);
 
 private:
    TwoLevelQueue<vid2_t>        queue;
-   triangle_t* d_countsPerPair { nullptr };
+   load_balancing::BinarySearch load_balancing;
+   count_t* d_countsPerPair { nullptr };
 
 };
 
