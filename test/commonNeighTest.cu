@@ -59,7 +59,7 @@ int main(int argc, char* argv[]) {
     //cudaProfilerStop();
     TM.print("Computation time:");
 
-	if (argc > 2) {	
+	if (argc > 3) {	
 		cn.writeToFile(outPath);
   	}
     return 0;

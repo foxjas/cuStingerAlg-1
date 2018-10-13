@@ -46,10 +46,10 @@ struct OPERATOR_InitPairsData {
 		vid_t src_id = vertex.id();
 		Vertex dst = edge.dst();
 
-		for (int i=dst.degree(); i>= 0; i--) {
+		for (int i=dst.degree()-1; i>= 0; i--) {
 			vid_t dst_neighb_id = dst.neighbor_id(i); 
 
-            printf("(%d, %d, %d)\n", src_id, dst.id(), dst_neighb_id);
+            //printf("(%d, %d, %d)\n", src_id, dst.id(), dst_neighb_id);
             // enforcing dst neighbor > src
             // early termination for sorted adjacency
             if (dst_neighb_id <= src_id) 
@@ -77,7 +77,7 @@ struct OPERATOR_InitPairsFromChains {
 	OPERATOR(Vertex& vertex, Edge& edge) {
 		vid_t src_id = vertex.id();
 		Vertex dst = edge.dst();
-		for (int i=dst.degree(); i>= 0; i--) {
+		for (int i=dst.degree()-1; i>= 0; i--) {
 			vid_t dst_neighb_id = dst.neighbor_id(i); 
             // enforcing dst neighbor > src
             // early termination for sorted adjacency
@@ -271,7 +271,7 @@ void commonNeigh::run(const int WORK_FACTOR=9999, bool isTopK=false){
     const unsigned int QUEUE_PAIRS_LIMIT = min(nV*nV, (int)5E8); // allocate memory for pairs up to limit
     std::cout << "QUEUE_PAIRS_LIMIT: " << QUEUE_PAIRS_LIMIT << std::endl;
     const unsigned int vStepSize = floor((double)QUEUE_PAIRS_LIMIT/nV); // double to avoid underflow from division
-    std::cout << "vStepSize: " << vStepSize << std::endl;
+    //std::cout << "vStepSize: " << vStepSize << std::endl;
     unsigned int vStart = 0;
     unsigned int vEnd = min(vStart + vStepSize, nV); 
     unsigned int queue_size;
@@ -286,21 +286,29 @@ void commonNeigh::run(const int WORK_FACTOR=9999, bool isTopK=false){
     Timer<DEVICE> TM(5);
     while (vStart < nV) {
         //std::cout << "vStart: " << vStart << ", " << "vEnd: " << vEnd << std::endl;
-       TM.start();
        forAll(static_cast<size_t>(vEnd-vStart), OPERATOR_InitVertexSubset { activeVertices, vStart });
        activeVertices.swap();
-       std::cout << "active vertices size: " << activeVertices.size() << std::endl;
+       //std::cout << "active vertices size: " << activeVertices.size() << std::endl;
 
+       TM.start();
        forAllEdges(hornet, activeVertices, OPERATOR_InitPairsData { d_pairsVisited, d_countsPerPair, vStart, nV }, load_balancing);
+       TM.stop();
+       TM.print("Resetting memory:");
+
+       TM.start();
        forAllEdges(hornet, activeVertices, OPERATOR_InitPairsFromChains { queue, d_pairsVisited, vStart, nV }, load_balancing);
        queue.swap(); // needed here 
+       TM.stop();
+       TM.print("Creating pairs:");
 
        const vid2_t* d_vertexPairs = queue.device_input_ptr();
        queue_size = queue.size();
        std::cout << "queue_size: " << queue_size << std::endl;
-       TM.stop();
-       TM.print("Creating pairs:");
+       
+       TM.start();
        forAllAdjUnions(hornet, d_vertexPairs, queue_size, OPERATOR_AdjIntersectionCountBalanced { d_countsPerPair, vStart, nV }, WORK_FACTOR); 
+       TM.stop();
+       TM.print("Intersection processing:");
         
        if (isTopK) {  
             count_t* h_countsPerPair;
@@ -320,11 +328,6 @@ void commonNeigh::run(const int WORK_FACTOR=9999, bool isTopK=false){
        vStart = vEnd;
        vEnd = min(vEnd+vStepSize, nV);
 
-	   /*	
-       TM.start();
-       TM.stop();
-       TM.print("Resetting memory:");
-       */
     }
 
     if (isTopK) {
