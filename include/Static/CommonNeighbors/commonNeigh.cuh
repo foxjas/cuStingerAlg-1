@@ -26,7 +26,7 @@ public:
     void release()  override;
     bool validate() override { return true; }
 
-    void run(const int WORK_FACTOR, bool isTopK);
+    void run(const int WORK_FACTOR, bool isTopK, bool verbose);
     void init();
 
     count_t countTriangles();

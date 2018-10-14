@@ -47,13 +47,15 @@ int main(int argc, char* argv[]) {
     if (argc > 2) {
         outPath = argv[2];
     } 
+
+	bool isVerbose = hasOption("-v", argc, argv);
 	bool isTopK = hasOption("--top", argc, argv);
 
     Timer<DEVICE> TM(5);
     //cudaProfilerStart();
     TM.start();
 
-    cn.run(work_factor, isTopK);
+    cn.run(work_factor, isTopK, isVerbose);
 
     TM.stop();
     //cudaProfilerStop();

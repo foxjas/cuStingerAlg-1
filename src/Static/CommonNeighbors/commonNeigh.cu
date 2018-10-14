@@ -35,7 +35,10 @@ struct OPERATOR_InitVertexSubset {
     }
 };
 
-
+/*
+ * Initializes pairs-related data in "sparse" manner
+ * by accessing via length 2 chains
+ */
 struct OPERATOR_InitPairsData {
 	int* d_pairsVisited;	
     count_t *d_countsPerPair;
@@ -206,7 +209,7 @@ std::vector<mytuple> topK(count_t* countsPerPair, vid_t vStart, vid_t vEnd, vid_
     return top_k;
 }
 
-count_t commonNeigh::countTriangles(){
+count_t commonNeigh::sequential() {
 
     count_t* h_countsPerPair;
     host::allocate(h_countsPerPair, hornet.nE());
@@ -263,7 +266,7 @@ void printResults(count_t* countsPerPair, unsigned int vStart, unsigned int vEnd
 /////////////////////////////////////////////////////
 // Main logic 
 ////////////////////////////////////////////////////
-void commonNeigh::run(const int WORK_FACTOR=9999, bool isTopK=false){
+void commonNeigh::run(const int WORK_FACTOR=9999, bool isTopK=false, bool verbose=false){
   
     using namespace timer;
     const unsigned int K = 10;
@@ -293,22 +296,28 @@ void commonNeigh::run(const int WORK_FACTOR=9999, bool isTopK=false){
        TM.start();
        forAllEdges(hornet, activeVertices, OPERATOR_InitPairsData { d_pairsVisited, d_countsPerPair, vStart, nV }, load_balancing);
        TM.stop();
-       TM.print("Resetting memory:");
+       if (verbose)
+            TM.print("Resetting memory:");
 
        TM.start();
        forAllEdges(hornet, activeVertices, OPERATOR_InitPairsFromChains { queue, d_pairsVisited, vStart, nV }, load_balancing);
        queue.swap(); // needed here 
        TM.stop();
-       TM.print("Creating pairs:");
+       if (verbose)
+            TM.print("Creating pairs:");
 
        const vid2_t* d_vertexPairs = queue.device_input_ptr();
        queue_size = queue.size();
-       std::cout << "queue_size: " << queue_size << std::endl;
+
+       if (verbose)
+            std::cout << "queue_size: " << queue_size << std::endl;
        
        TM.start();
        forAllAdjUnions(hornet, d_vertexPairs, queue_size, OPERATOR_AdjIntersectionCountBalanced { d_countsPerPair, vStart, nV }, WORK_FACTOR); 
        TM.stop();
-       TM.print("Intersection processing:");
+
+       if (verbose)
+            TM.print("Intersection processing:");
         
        if (isTopK) {  
             count_t* h_countsPerPair;
