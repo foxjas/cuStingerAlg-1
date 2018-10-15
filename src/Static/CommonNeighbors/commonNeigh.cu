@@ -87,6 +87,7 @@ struct OPERATOR_InitPairsFromChains {
             if (dst_neighb_id <= src_id) 
                 break;
 
+
 			// atomic compare and swap on d_pairsVisited;
             int dst_neigh_offset = (src_id - vStart)*nV + dst_neighb_id;
             int old_val = atomicCAS(d_pairsVisited+dst_neigh_offset, UNSET, (int)src_id);
@@ -192,8 +193,12 @@ std::vector<mytuple> topK(count_t* countsPerPair, vid_t vStart, vid_t vEnd, vid_
 
 	for (vid_t u=vStart; u<vEnd; u++) {
 		for (vid_t v = u+1; v<nV; v++) {
-			mytuple pair_count = mytuple(u, v, countsPerPair[(u-vStart)*nV+v]);
-			indexedCounts.push_back(pair_count);
+            count_t commonCount = countsPerPair[(u-vStart)*nV+v];
+            // ** undefined behavior if there are < K non-zero pair counts
+            if (commonCount > 0) {
+			    mytuple pair_count = mytuple(u, v, commonCount);
+			    indexedCounts.push_back(pair_count);
+            }
 		} 
 	}
     std::nth_element(indexedCounts.begin(), indexedCounts.begin()+K, indexedCounts.end(), decreasingComparator);
@@ -208,23 +213,6 @@ std::vector<mytuple> topK(count_t* countsPerPair, vid_t vStart, vid_t vEnd, vid_
     }
     return top_k;
 }
-
-count_t commonNeigh::sequential() {
-
-    count_t* h_countsPerPair;
-    host::allocate(h_countsPerPair, hornet.nE());
-    gpu::copyToHost(d_countsPerPair, hornet.nE(), h_countsPerPair);
-    count_t sum=0;
-    for(int i=0; i<hornet.nE(); i++){
-        // printf("%d %ld\n", i,outputArray[i]);
-        sum+=h_countsPerPair[i];
-    }
-    free(h_countsPerPair);
-    //count_t sum=gpu::reduce(hd_triangleData().countsPerPair, hd_triangleData().nv+1);
-
-    return sum;
-}
-
 
 /*
  * Writes common neighbor counts to file
@@ -279,25 +267,21 @@ void commonNeigh::run(const int WORK_FACTOR=9999, bool isTopK=false, bool verbos
     unsigned int vEnd = min(vStart + vStepSize, nV); 
     unsigned int queue_size;
     
+    Timer<DEVICE> TM(5);
     queue.initialize(static_cast<size_t>(vStepSize*nV));
     TwoLevelQueue<vid_t> activeVertices(static_cast<size_t>(vStepSize));
 
     gpu::allocate(d_countsPerPair, vStepSize*nV);
+    cudaMemset(d_countsPerPair, 0, vStepSize*nV*sizeof(count_t));
     int* d_pairsVisited;
     gpu::allocate(d_pairsVisited, vStepSize*nV);
+    cudaMemset(d_pairsVisited, UNSET, vStepSize*nV*sizeof(int));
     std::vector<mytuple> top_k;
-    Timer<DEVICE> TM(5);
     while (vStart < nV) {
         //std::cout << "vStart: " << vStart << ", " << "vEnd: " << vEnd << std::endl;
        forAll(static_cast<size_t>(vEnd-vStart), OPERATOR_InitVertexSubset { activeVertices, vStart });
        activeVertices.swap();
        //std::cout << "active vertices size: " << activeVertices.size() << std::endl;
-
-       TM.start();
-       forAllEdges(hornet, activeVertices, OPERATOR_InitPairsData { d_pairsVisited, d_countsPerPair, vStart, nV }, load_balancing);
-       TM.stop();
-       if (verbose)
-            TM.print("Resetting memory:");
 
        TM.start();
        forAllEdges(hornet, activeVertices, OPERATOR_InitPairsFromChains { queue, d_pairsVisited, vStart, nV }, load_balancing);
@@ -308,10 +292,10 @@ void commonNeigh::run(const int WORK_FACTOR=9999, bool isTopK=false, bool verbos
 
        const vid2_t* d_vertexPairs = queue.device_input_ptr();
        queue_size = queue.size();
-
        if (verbose)
             std::cout << "queue_size: " << queue_size << std::endl;
        
+
        TM.start();
        forAllAdjUnions(hornet, d_vertexPairs, queue_size, OPERATOR_AdjIntersectionCountBalanced { d_countsPerPair, vStart, nV }, WORK_FACTOR); 
        TM.stop();
@@ -321,7 +305,7 @@ void commonNeigh::run(const int WORK_FACTOR=9999, bool isTopK=false, bool verbos
         
        if (isTopK) {  
             count_t* h_countsPerPair;
-            host::allocate(h_countsPerPair, (vEnd-vStart)*nV);
+            host::allocate(h_countsPerPair, (vEnd-vStart)*nV); // TODO: move allocation outside loop; should be 1-time cost
             gpu::copyToHost(d_countsPerPair, (vEnd-vStart)*nV, h_countsPerPair);
             //printResults(h_countsPerPair, vStart, vEnd, nV);
             // logic for top_k calculations
@@ -333,6 +317,12 @@ void commonNeigh::run(const int WORK_FACTOR=9999, bool isTopK=false, bool verbos
             std::sort(temp.begin(), temp.end(), decreasingComparator);
             top_k.assign(temp.begin(), temp.begin()+K);
        }
+
+       TM.start();
+       forAllEdges(hornet, activeVertices, OPERATOR_InitPairsData { d_pairsVisited, d_countsPerPair, vStart, nV }, load_balancing);
+       TM.stop();
+       if (verbose)
+            TM.print("Resetting memory:");
 
        vStart = vEnd;
        vEnd = min(vEnd+vStepSize, nV);

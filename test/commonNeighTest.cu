@@ -27,6 +27,35 @@ bool hasOption(const char* option, int argc, char **argv) {
   return false;
 }
 
+// CPU Version - assume sorted index lists. 
+int hostSingleIntersection ( vid_t ai, vid_t bi, degree_t alen, 
+                            degree_t blen, const vid_t * a, const vid_t * b){
+
+    int32_t ka = 0, kb = 0;
+     int32_t out = 0;
+
+
+    if (!alen || !blen || a[alen-1] < b[0] || b[blen-1] < a[0])
+    return 0;
+
+    const vid_t *aptr=a, *aend=a+alen;
+    const vid_t *bptr=b, *bend=b+blen;
+
+    while(aptr< aend && bptr<bend){
+        if(*aptr==*bptr){
+            aptr++, bptr++, out++;
+        }
+        else if(*aptr<*bptr){
+            aptr++;
+        }
+        else {
+            bptr++;
+        }
+      }  
+  
+    return out;
+}
+
 
 int main(int argc, char* argv[]) {
    
@@ -61,6 +90,16 @@ int main(int argc, char* argv[]) {
     //cudaProfilerStop();
     TM.print("Computation time:");
 
+    /*
+    vid_t src = 4002;
+    vid_t dst = 34026;
+    const eoff_t *off = graph.csr_out_offsets();
+    const vid_t *ind = graph.csr_out_edges();
+    vid_t src_len = off[src+1]-off[src];
+    vid_t dst_len = off[dst+1]-off[dst];
+    int commonCount = hostSingleIntersection(src, dst, src_len, dst_len, ind+off[src], ind+off[dst]);
+    std::cout << "(" << src << "," << dst << "): " << commonCount << std::endl;
+    */
 	if (argc > 3) {	
 		cn.writeToFile(outPath);
   	}
