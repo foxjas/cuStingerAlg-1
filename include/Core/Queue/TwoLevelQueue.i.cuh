@@ -129,13 +129,22 @@ void TwoLevelQueue<T>::insert(const T& item) noexcept {
 }
 
 template<typename T>
+__host__ __device__ __forceinline__
 void TwoLevelQueue<T>::insert(const T* items_array, int num_items) noexcept {
+#if defined(__CUDA_ARCH__)
+    int pos = atomicAdd(&_d_counters->y, num_items);
+    for(int i=0; i<num_items; i++){
+        _d_queue_ptrs.second[pos+i] = items_array[i];
+    }
+
+#else    
     cuMemcpyToHost(_d_counters, _h_counters);
     cuMemcpyToDevice(items_array, num_items,
                      _d_queue_ptrs.first + _h_counters.x);
     _h_counters.x  += num_items;
     _enqueue_items += num_items;
     cuMemcpyToDevice(_h_counters, _d_counters);
+#endif
 }
 
 template<typename = void>

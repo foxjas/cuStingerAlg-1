@@ -108,6 +108,7 @@ public:
      * @remark the method can be called only on the host
      * @remark the method may be expensive
      */
+     __host__ __device__ __forceinline__
     void insert(const T* items_array, int num_items) noexcept;
 
     /**

@@ -406,7 +406,7 @@ void forAllAdjUnions(HornetClass&          hornet,
     //load_balancing::BinarySearch load_balancing ( hornet );
 
     timer::Timer<timer::DEVICE> TM(5);
-    TM.start();
+    // TM.start();
 
     // memory allocations host and device side
     cudaMalloc(&(hd_queue_info().d_pairs_queue), 2*pairs_queue_size*sizeof(vid_t)); 
@@ -439,9 +439,9 @@ void forAllAdjUnions(HornetClass&          hornet,
     else
         forAllEdgeVertexPairs(hornet, bin_edges {hd_queue_info, false, WORK_FACTOR}, load_balancing);
 
-    TM.stop();
-    TM.print("queueing and binning:");
-    TM.reset();
+    // TM.stop();
+    // TM.print("queueing and binning:");
+    // TM.reset();
     
     /*
     cudaMemcpy(hd_queue_info().queue_pos, hd_queue_info().d_queue_pos, (MAX_ADJ_UNIONS_BINS+1)*sizeof(unsigned long long), cudaMemcpyDeviceToHost);
@@ -466,11 +466,11 @@ void forAllAdjUnions(HornetClass&          hornet,
         if (size) {
             threads_per = 1 << (threads_log-1); 
             printf("threads_per=%d, size=%d\n", threads_per, size);
-            TM.start();
+            // TM.start();
             forAllEdgesAdjUnionBalanced(hornet, hd_queue_info().d_pairs_queue, start_index, end_index, op, threads_per, 0);
-            TM.stop();
-            TM.print("balanced queue processing:");
-            TM.reset();
+            // TM.stop();
+            // TM.print("balanced queue processing:");
+            // TM.reset();
         }
         start_index = end_index;
         threads_log += 1;
@@ -482,11 +482,11 @@ void forAllAdjUnions(HornetClass&          hornet,
     if (size) {
         threads_per = 1 << (threads_log-1); 
         printf("threads_per=%d, size=%d\n", threads_per, size);
-        TM.start();
+        // TM.start();
         forAllEdgesAdjUnionBalanced(hornet, hd_queue_info().d_pairs_queue, start_index, end_index, op, threads_per, 0);
-        TM.stop();
-        TM.print("balanced queue processing:");
-        TM.reset();
+        // TM.stop();
+        // TM.print("balanced queue processing:");
+        // TM.reset();
     }
     start_index = end_index;
 
@@ -531,8 +531,8 @@ void forAllAdjUnions(HornetClass&          hornet,
         //TM.reset();
     }
 
-    TM.stop();
-    TM.print("queue processing:");
+    // TM.stop();
+    // TM.print("queue processing:");
     
     //free remaining memory
     free(queue_sizes);
