@@ -202,7 +202,7 @@ struct OPERATOR_InitPairsFromChains {
 
 
 };
-
+/*
 template<typename HornetDevice>
 __global__ void  InitPairsFromChainsKernel(
     pairInfo     *d_reOrg,
@@ -224,6 +224,63 @@ __global__ void  InitPairsFromChainsKernel(
         int pos_start = (src_id - vStart)*nV;
 
         __shared__ vid2_t addToQueue[SPILL_SIZE];
+        int counter=0;
+
+        vid_t* neighPtr = hornet.vertex(dst_id).neighbor_ptr();
+
+        for (int i=d_reOrg[k].length_dest-1; i>= 0; i--) {
+
+            vid_t dst_neighb_id = neighPtr[i]; 
+
+            // vid_t dst_neighb_id = dst.neighbor_id(i); 
+
+            // enforcing dst neighbor > src
+            // early termination for sorted adjacency
+            if (dst_neighb_id <= src_id) 
+                break;
+
+
+            // atomic compare and swap on d_pairsVisited;
+            int dst_neigh_offset = pos_start + dst_neighb_id;
+            
+            if(d_pairsVisited[dst_neigh_offset]==UNSET){
+                int old_val=atomicAdd(d_pairsVisited+dst_neigh_offset,1);
+                if (old_val ==UNSET) {
+                    vid2_t temp = {src_id, dst_neighb_id};
+                    addToQueue[counter++]=temp;
+                    if(counter==SPILL_SIZE){
+                        uniquePairs.insert(addToQueue,SPILL_SIZE);
+                        counter=0;
+                    }
+                }
+            }
+        }
+        if(counter>0)
+            uniquePairs.insert(addToQueue,counter);
+
+}
+
+*/
+template<typename HornetDevice>
+__global__ void  InitPairsFromChainsKernel(
+    pairInfo     *d_reOrg,
+    int N,
+    TwoLevelQueue<vid2_t> uniquePairs,
+    int* d_pairsVisited,
+    unsigned int vStart,
+    const unsigned int nV,
+    HornetDevice hornet){
+    
+
+        int k = threadIdx.x + blockIdx.x *blockDim.x;
+        if(k>=N)
+            return;
+
+        vid_t src_id = d_reOrg[k].src;
+        vid_t dst_id =  d_reOrg[k].dest;
+        int pos_start = (src_id - vStart)*nV;
+
+        vid2_t addToQueue[SPILL_SIZE];
         int counter=0;
 
         vid_t* neighPtr = hornet.vertex(dst_id).neighbor_ptr();
