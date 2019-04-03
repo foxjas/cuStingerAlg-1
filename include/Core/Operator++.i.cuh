@@ -465,7 +465,7 @@ void forAllAdjUnions(HornetClass&          hornet,
         size = end_index - start_index;
         if (size) {
             threads_per = 1 << (threads_log-1); 
-            printf("threads_per=%d, size=%d\n", threads_per, size);
+            // printf("threads_per=%d, size=%d\n", threads_per, size);
             // TM.start();
             forAllEdgesAdjUnionBalanced(hornet, hd_queue_info().d_pairs_queue, start_index, end_index, op, threads_per, 0);
             // TM.stop();
@@ -481,7 +481,7 @@ void forAllAdjUnions(HornetClass&          hornet,
     size = end_index - start_index;
     if (size) {
         threads_per = 1 << (threads_log-1); 
-        printf("threads_per=%d, size=%d\n", threads_per, size);
+        // printf("threads_per=%d, size=%d\n", threads_per, size);
         // TM.start();
         forAllEdgesAdjUnionBalanced(hornet, hd_queue_info().d_pairs_queue, start_index, end_index, op, threads_per, 0);
         // TM.stop();

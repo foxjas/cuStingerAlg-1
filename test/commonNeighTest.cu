@@ -71,7 +71,7 @@ int main(int argc, char* argv[]) {
     commonNeigh cn(hornet_graph);
     cn.init();
     
-    const int work_factor = 9999;
+    const int work_factor = 99;
 	char* outPath;
     if (argc > 2) {
         outPath = argv[2];

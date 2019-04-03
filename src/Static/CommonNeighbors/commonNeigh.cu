@@ -94,8 +94,9 @@ __global__ void  InitPairsData_kernel(
         vid_t dst_id =  d_reOrg[k].dest;
 
         vid_t* neighPtr = hornet.vertex(dst_id).neighbor_ptr();
+        int length = d_reOrg[k].length_dest-1;
 
-        for (int i=d_reOrg[k].length_dest-1; i>= 0; i--) {
+        for (int i=length; i>= 0; i--) {
 
             vid_t dst_neighb_id = neighPtr[i]; 
 
@@ -134,7 +135,9 @@ struct OPERATOR_InitPairsFromChains {
 
         vid2_t addToQueue[SPILL_SIZE];
         int counter=0;
-		for (int i=dst.degree()-1; i>= 0; i--) {
+      int length = dst.degree()-1;
+
+		for (int i=length; i>= 0; i--) {
 			vid_t dst_neighb_id = dst.neighbor_id(i); 
             // enforcing dst neighbor > src
             // early termination for sorted adjacency
@@ -202,7 +205,7 @@ struct OPERATOR_InitPairsFromChains {
 
 
 };
-/*
+
 template<typename HornetDevice>
 __global__ void  InitPairsFromChainsKernel(
     pairInfo     *d_reOrg,
@@ -223,12 +226,13 @@ __global__ void  InitPairsFromChainsKernel(
         vid_t dst_id =  d_reOrg[k].dest;
         int pos_start = (src_id - vStart)*nV;
 
-        __shared__ vid2_t addToQueue[SPILL_SIZE];
+        vid2_t addToQueue[SPILL_SIZE];
         int counter=0;
 
         vid_t* neighPtr = hornet.vertex(dst_id).neighbor_ptr();
+        int length = d_reOrg[k].length_dest-1;
 
-        for (int i=d_reOrg[k].length_dest-1; i>= 0; i--) {
+        for (int i=length; i>= 0; i--) {
 
             vid_t dst_neighb_id = neighPtr[i]; 
 
@@ -260,7 +264,13 @@ __global__ void  InitPairsFromChainsKernel(
 
 }
 
-*/
+
+
+
+#define WARP_SIZE 32
+#define ELEMENTS_PER_WARP 128
+
+/*
 template<typename HornetDevice>
 __global__ void  InitPairsFromChainsKernel(
     pairInfo     *d_reOrg,
@@ -280,8 +290,19 @@ __global__ void  InitPairsFromChainsKernel(
         vid_t dst_id =  d_reOrg[k].dest;
         int pos_start = (src_id - vStart)*nV;
 
-        vid2_t addToQueue[SPILL_SIZE];
-        int counter=0;
+
+        __shared__ int     shared_warp_counter[BLOCK_SIZE_OP2/WARP_SIZE];
+        __shared__ vid2_t  shared_joined_pairs[BLOCK_SIZE_OP2/WARP_SIZE][ELEMENTS_PER_WARP];
+
+        const int warp_id = threadIdx.x/warp_size;
+        const int lane_id = threadIdx.x%warp_size;
+
+        if ( 0 == lane_id )
+            shared_warp_counter[warp_id] = 0;
+        __syncwarp();
+
+        unsigned int activemask = __ballot_sync(0xffffffff, 1);
+
 
         vid_t* neighPtr = hornet.vertex(dst_id).neighbor_ptr();
 
@@ -289,10 +310,6 @@ __global__ void  InitPairsFromChainsKernel(
 
             vid_t dst_neighb_id = neighPtr[i]; 
 
-            // vid_t dst_neighb_id = dst.neighbor_id(i); 
-
-            // enforcing dst neighbor > src
-            // early termination for sorted adjacency
             if (dst_neighb_id <= src_id) 
                 break;
 
@@ -304,19 +321,17 @@ __global__ void  InitPairsFromChainsKernel(
                 int old_val=atomicAdd(d_pairsVisited+dst_neigh_offset,1);
                 if (old_val ==UNSET) {
                     vid2_t temp = {src_id, dst_neighb_id};
-                    addToQueue[counter++]=temp;
-                    if(counter==SPILL_SIZE){
-                        uniquePairs.insert(addToQueue,SPILL_SIZE);
-                        counter=0;
-                    }
+                    int pos = atomicAdd(&counter,1);
+                    addToQueue[pos]=temp;
                 }
             }
+
         }
         if(counter>0)
             uniquePairs.insert(addToQueue,counter);
 
 }
-
+*/
 
 struct OPERATOR_AdjIntersectionCountBalanced {
     count_t* d_countsPerPair;
@@ -650,7 +665,7 @@ void commonNeigh::run(const int WORK_FACTOR=9999, bool isTopK=false, bool verbos
 
 
 
-        const int RB_BLOCK_SIZE = 64;
+        const int RB_BLOCK_SIZE = 32;
         int rebinblocks = (*totalPairs)/RB_BLOCK_SIZE + (((*totalPairs)%RB_BLOCK_SIZE)?1:0);
 
         if(rebinblocks){
@@ -675,7 +690,7 @@ void commonNeigh::run(const int WORK_FACTOR=9999, bool isTopK=false, bool verbos
        
 
        // TM.start();
-       // forAllAdjUnions(hornet, d_vertexPairs, queue_size, OPERATOR_AdjIntersectionCountBalanced { d_countsPerPair, vStart, nV }, WORK_FACTOR); 
+       forAllAdjUnions(hornet, d_vertexPairs, queue_size, OPERATOR_AdjIntersectionCountBalanced { d_countsPerPair, vStart, nV }, WORK_FACTOR); 
        // TM.stop();
 
        // if (verbose)
@@ -700,7 +715,10 @@ void commonNeigh::run(const int WORK_FACTOR=9999, bool isTopK=false, bool verbos
        // forAllEdges(hornet, activeVertices, OPERATOR_InitPairsData { d_pairsVisited, d_countsPerPair, vStart, nV }, load_balancing);
 
        // forAllEdges(hornet, activeVertices, OPERATOR_InitPairsData { d_pairsVisited, d_countsPerPair, vStart, nV }, load_balancing);
-       // InitPairsData_kernel<<<rebinblocks,RB_BLOCK_SIZE>>>(edgePairsReOrdered,*totalPairs,d_pairsVisited, d_countsPerPair, vStart, nV, hornet.device_side());
+       if(rebinblocks){
+         InitPairsData_kernel<<<rebinblocks,RB_BLOCK_SIZE>>>(edgePairsReOrdered,*totalPairs,d_pairsVisited, d_countsPerPair, vStart, nV, hornet.device_side());
+
+       }
 
        // TM.stop();
        // if (verbose)
